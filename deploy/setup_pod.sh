@@ -16,7 +16,8 @@ source "$VENV/bin/activate"
 
 echo "== packages (Ditto's environment.yaml pins + server)"
 uv pip install -q "torch==2.5.1" --index-url https://download.pytorch.org/whl/cu121
-uv pip install -q -r "$REPO/deploy/requirements-server.txt"
+uv pip install -q --extra-index-url https://pypi.nvidia.com --index-strategy unsafe-best-match \
+  -r "$REPO/deploy/requirements-server.txt"
 
 echo "== weights: cfg + Ampere_Plus TensorRT engines"
 python - "$REPO/checkpoints" <<'PY'
@@ -26,5 +27,5 @@ snapshot_download("digital-avatar/ditto-talkinghead", local_dir=sys.argv[1],
                   allow_patterns=["ditto_cfg/*", "ditto_trt_Ampere_Plus/*"])
 PY
 du -sh "$REPO"/checkpoints/* || true
-python -c "import tensorrt, torch; print('tensorrt', tensorrt.__version__, '| torch', torch.__version__, '| cuda', torch.cuda.is_available())"
+cd "$REPO" && python -c "from core.utils.tensorrt_utils import trt; import torch; print('tensorrt', trt.__version__, '| torch', torch.__version__, '| cuda', torch.cuda.is_available())"
 echo "SETUP DONE"; date

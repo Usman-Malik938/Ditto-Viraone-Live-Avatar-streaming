@@ -1,5 +1,7 @@
-# Ditto's pinned packages (environment.yaml), install torch 2.5.1 cu121 first
-tensorrt==8.6.1
+# Ditto's pinned packages (environment.yaml), install torch 2.5.1 cu121 first.
+# TensorRT 8.6.1 comes from NVIDIA's index (https://pypi.nvidia.com): the bindings provide the `tensorrt`
+# module and tensorrt-libs the .so files (Ditto loads them itself if needed). The PyPI `tensorrt` meta
+# package is only an installer stub, so it's left out.
 tensorrt-bindings==8.6.1
 tensorrt-libs==8.6.1
 cuda-python==12.6.2.post1
