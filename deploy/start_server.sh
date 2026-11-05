@@ -6,4 +6,5 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 : "${VIRAONE_API_KEY:?set VIRAONE_API_KEY first}"
 source "${VENV:-/workspace/venv310}/bin/activate"
 export AVATAR_DIR="${AVATAR_DIR:-/workspace/avatars}"
+export LD_LIBRARY_PATH="${CUDNN8:-/workspace/cudnn8}/lib:${LD_LIBRARY_PATH:-}"   # cuDNN 8 for TensorRT 8.6
 exec python "$REPO/server/server.py"

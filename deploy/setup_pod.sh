@@ -19,6 +19,17 @@ uv pip install -q "torch==2.5.1" --index-url https://download.pytorch.org/whl/cu
 uv pip install -q --extra-index-url https://pypi.nvidia.com --index-strategy unsafe-best-match \
   -r "$REPO/deploy/requirements-server.txt"
 
+echo "== cuDNN 8 for TensorRT 8.6's plugins (torch keeps its own cuDNN 9)"
+CUDNN8="${CUDNN8:-/workspace/cudnn8}"
+if [ ! -f "$CUDNN8/lib/libcudnn.so.8" ]; then
+  tmp="$(mktemp -d)"
+  pip download -q --no-deps "nvidia-cudnn-cu12==8.9.7.29" -d "$tmp"
+  python -m zipfile -e "$tmp"/nvidia_cudnn_cu12-*.whl "$tmp/x"
+  mkdir -p "$CUDNN8" && cp -r "$tmp/x/nvidia/cudnn/lib" "$CUDNN8/"
+  rm -rf "$tmp"
+fi
+export LD_LIBRARY_PATH="$CUDNN8/lib:${LD_LIBRARY_PATH:-}"
+
 echo "== weights: cfg + Ampere_Plus TensorRT engines"
 python - "$REPO/checkpoints" <<'PY'
 import sys
