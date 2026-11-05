@@ -4,15 +4,18 @@ Built on Ditto's online pipeline (stream_pipeline_online.StreamSDK, TensorRT, Hu
 A session keeps the avatar alive continuously: when no speech is queued it is fed silence, so the
 face idles (blinks, subtle motion) and speech starts on the next 0.2 s tick.
 
-Final global settings (same as the v6 FINAL Colab notebook), applied to every portrait:
-mouth 0.9, smoothing 3, Neutral emotion, own-face reference, head 0.6 / 0.6 / 0.5,
-lips close in pauses (lips-only vad_alpha), head-drift stabiliser.
+Final global settings: exactly those of the v6 FINAL Colab notebook (Cell 6), applied to every portrait:
+mouth 0.9, smoothing 3, Neutral emotion, own-face reference, head 0.6 / 0.6 / 0.5, 50 motion steps,
+Ditto's offline overlap (10), seed 1024, lips close in pauses (lips-only vad_alpha, the notebook's
+pause_alpha formula), head-drift stabiliser, full resolution (max 1280).
 """
 import math
 import os
 import queue
+import random
 import threading
 import time
+from collections import deque
 
 import cv2
 import numpy as np
@@ -29,16 +32,27 @@ TICK_SAMPLES = TICK_FRAMES * SPF
 SPLIT_LEN = int(sum(CHUNKSIZE) * 0.04 * SR) + 80   # 6480 samples per HuBERT window
 PREFIX = CHUNKSIZE[0] * SPF     # zeros prepended once, as in Ditto's inference.py
 
+# ===================== FINAL GLOBAL SETTINGS (identical to ditto_colab v6 FINAL, Cell 6) =====================
+MOUTH_GAIN = 0.90               # jaw opening calibrated to the client's real speaking video
+SMOOTHING = 3                   # smooth transitions between mouth shapes
+HEAD_NOD, HEAD_TURN, HEAD_TILT = 0.6, 0.6, 0.5   # subtle, natural head movement
+PAUSE_CLOSE = 1.0               # lips close in speech pauses (1 = fully, 0 = off)
+HEAD_STABILISE = True           # removes slow head/chin drift (keeps quick natural nods)
+DRIFT_WINDOW_S = 1.5            # head movement slower than this counts as drift
+SAMPLING_STEPS, MAX_SIZE, CROP_SCALE, SEED = 50, 1280, 2.3, 1024
+OVERLAP_V2 = 10                 # the notebook's offline cfg value; the real-time cfg default is 70
+# ==============================================================================================================
+
 FINAL_STYLE = {
-    "smo_k_d": 3,
-    "emo": 4,                   # Neutral
-    "ch_info": None,            # each photo's own face as the reference
-    "use_d_keys": {"exp": 0.90, "pitch": 0.6, "yaw": 0.6, "roll": 0.5, "t": 0.6},
-    "crop_scale": 2.3,
-    "max_size": 1280,
+    "smo_k_d": SMOOTHING,
+    "emo": 4,                   # 4 = Neutral (no stored "smile" emotion clip)
+    "ch_info": None,            # use each photo's own face as the reference
+    "use_d_keys": {"exp": MOUTH_GAIN, "pitch": HEAD_NOD, "yaw": HEAD_TURN, "roll": HEAD_TILT, "t": HEAD_TURN},
+    "sampling_timesteps": SAMPLING_STEPS,
+    "overlap_v2": OVERLAP_V2,
+    "crop_scale": CROP_SCALE,
+    "max_size": MAX_SIZE,
 }
-PAUSE_CLOSE = 1.0               # lips close in pauses (0 = off)
-DRIFT_WINDOW_S = 1.5            # head motion slower than this counts as drift
 
 
 # ---- lips close in pauses: Ditto's vad_alpha, applied to the 6 lip points only (stock blends the whole face) ----
@@ -75,37 +89,56 @@ def _ctrl_motion_stable(x_d_info, **kw):
 _ms.ctrl_motion = _ctrl_motion_stable
 
 
-class PauseGate:
-    """Causal per-frame lip gate from loudness (rolling, no whole-clip statistics).
+def _frame_db(samples):
+    f = samples[: len(samples) // SPF * SPF].reshape(-1, SPF)
+    return 20 * np.log10(np.sqrt((f ** 2).mean(1)) + 1e-6)
 
-    Speech level is tracked with a slow running peak; a frame counts as speech when it is within
-    ~25 dB of that level and above an absolute floor. Lips open ~80 ms early (2-frame lookahead,
-    which Ditto's window already provides) and open/close over ~200 ms.
+
+class PauseGate:
+    """The notebook's pause_alpha, per frame, for a live stream.
+
+    Same formula: dB per 40 ms frame, normalised between the 10th and 95th percentile of the speech,
+    speech where the level is above 0.3, lips open 2 frames (~80 ms) early, 5-frame (~200 ms) soft
+    open/close, alpha = 1 - strength * (1 - gate). The notebook took the percentiles over the whole
+    clip; here they come from all speech received so far (last 30 s), which includes speech that is
+    queued but not played yet, so a TTS answer that arrives faster than real time is gated like a clip.
+    Idle silence the server inserts between answers always counts as a pause.
     """
 
-    def __init__(self, strength=PAUSE_CLOSE, lead=2, floor_db=-50.0):
-        self.strength, self.lead, self.floor = strength, lead, floor_db
-        self.peak = -20.0
-        self.db = []          # per-frame dB of all audio fed so far
-        self.speech = []      # per-frame 0/1
+    def __init__(self, strength=PAUSE_CLOSE, lead=2, window_frames=30 * FPS):
+        self.strength, self.lead = strength, lead
+        self.stats = deque(maxlen=window_frames)   # dB of received speech frames (incl. queued)
+        self._carry = np.zeros(0, dtype=np.float32)
+        self.db = []        # per fed frame
+        self.real = []      # per fed frame: True = client speech, False = inserted silence
 
-    def push(self, samples):
-        frames = samples.reshape(-1, SPF)
-        for f in frames:
-            db = 20 * math.log10(math.sqrt(float((f ** 2).mean())) + 1e-6)
-            if db > self.peak:
-                self.peak = db
-            else:
-                self.peak = max(self.peak - 0.02, -40.0)   # slow decay so a quiet speaker still registers
-            self.db.append(db)
-            self.speech.append(1.0 if (db > self.floor and db > self.peak - 25.0) else 0.0)
+    def add_received(self, samples):
+        a = np.concatenate([self._carry, samples])
+        n = len(a) // SPF * SPF
+        if n:
+            self.stats.extend(_frame_db(a[:n]).tolist())
+        self._carry = a[n:]
+
+    def push(self, chunk, n_real):
+        self.db.extend(_frame_db(chunk).tolist())
+        self.real.extend(i * SPF < n_real for i in range(len(chunk) // SPF))
 
     def alpha(self, fid):
-        """vad_alpha for frame fid; needs frames up to fid + lead + 2 pushed."""
-        sp = self.speech
-        win = [max(sp[j:j + self.lead + 1] or [0.0]) for j in range(fid - 2, fid + 3) if 0 <= j < len(sp)]
-        gate = sum(win) / max(len(win), 1)
-        return float(min(max(1 - self.strength * (1 - gate), 0.0), 1.0))
+        """vad_alpha for frame fid; uses frames up to fid + lead + 2 if they have been fed."""
+        n = len(self.db)
+        if n == 0 or not self.stats:
+            return float(np.clip(1 - self.strength, 0, 1))
+        lo, hi = np.percentile(self.stats, 10), np.percentile(self.stats, 95)
+        span = max(hi - lo, 1e-6)
+
+        def speech(j):
+            return 1.0 if self.real[j] and np.clip((self.db[j] - lo) / span, 0, 1) > 0.3 else 0.0
+
+        def lead_max(i):                     # open ~80 ms before the sound
+            return max(speech(j) for j in range(i, min(i + self.lead + 1, n)))
+
+        gate = np.mean([lead_max(min(max(i, 0), n - 1)) for i in range(fid - 2, fid + 3)])   # edge-padded 5-frame mean
+        return float(np.clip(1 - self.strength * (1 - gate), 0, 1))
 
 
 class AvatarSDK(StreamSDK):
@@ -145,8 +178,8 @@ class StreamSession:
     640 audio samples that belong to it, so the client can play picture and sound in sync.
     """
 
-    def __init__(self, sdk: AvatarSDK, source_path, on_frame, out_height=960, jpeg_quality=80,
-                 sampling_timesteps=None, style=None):
+    def __init__(self, sdk: AvatarSDK, source_path, on_frame, out_height=0, jpeg_quality=90,
+                 sampling_timesteps=None, overlap_v2=None, style=None):
         self.sdk, self.on_frame = sdk, on_frame
         self.out_height, self.jpeg_quality = out_height, jpeg_quality
         self.speech = bytearray()            # queued speech, float32 bytes at 16 kHz
@@ -164,8 +197,17 @@ class StreamSession:
         kwargs = dict(FINAL_STYLE if style is None else style)
         if sampling_timesteps:
             kwargs["sampling_timesteps"] = sampling_timesteps
+        if overlap_v2:
+            kwargs["overlap_v2"] = overlap_v2
+        self.settings = {k: kwargs[k] for k in ("sampling_timesteps", "overlap_v2")}
+        random.seed(SEED); np.random.seed(SEED)
+        try:
+            import torch
+            torch.manual_seed(SEED); torch.cuda.manual_seed_all(SEED)
+        except ImportError:
+            pass
         sdk.on_frame = self._emit
-        _drift["on"], _drift["state"] = True, {}
+        _drift["on"], _drift["state"] = HEAD_STABILISE, {}
         sdk.setup(source_path, "/tmp/ditto_stream_unused.mp4", online_mode=True, **kwargs)
         try:
             sdk.writer.close()               # Ditto opens an mp4 writer in setup(); frames go to the callback instead
@@ -182,6 +224,7 @@ class StreamSession:
             if self.stats["first_speech_in"] is None and len(a):
                 self.stats["first_speech_in"] = time.time()
             self.speech += a.tobytes()
+            self.gate.add_received(a)
 
     def interrupt(self):
         """Drop queued speech (barge-in). Frames already in the pipeline still play out (~latency)."""
@@ -210,7 +253,7 @@ class StreamSession:
                 if n and self.stats["speech_frame_start"] is None:
                     self.stats["speech_frame_start"] = (len(self.fed) - PREFIX + self.fed_offset) // SPF
                 chunk = np.concatenate([take, np.zeros(TICK_SAMPLES - n, dtype=np.float32)])
-                self.gate.push(chunk)
+                self.gate.push(chunk, n)
                 self.fed = np.concatenate([self.fed, chunk])
                 self._submit_ready_windows()
                 next_t += TICK_FRAMES / FPS
@@ -264,7 +307,7 @@ class StreamSession:
         st = self.stats
         el = time.time() - st["started"] if st["started"] else 0
         r = {"frames_out": st["frames"], "seconds": round(el, 2), "fps_avg": round(st["frames"] / el, 2) if el else 0,
-             "late_ticks": st["late_ticks"], "queued_speech_s": round(self.queued_seconds(), 2)}
+             "late_ticks": st["late_ticks"], "queued_speech_s": round(self.queued_seconds(), 2), **self.settings}
         if st["first_speech_in"] and st["first_speech_frame_out"]:
             r["speech_to_lips_s"] = round(st["first_speech_frame_out"] - st["first_speech_in"], 3)
         return r

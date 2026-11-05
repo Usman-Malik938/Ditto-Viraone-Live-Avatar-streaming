@@ -5,7 +5,9 @@ Endpoints
   GET  /                            browser test viewer (enter the API key on the page)
   POST /v1/avatars                  upload a portrait -> {"avatar_id"}
   GET  /v1/avatars                  list portraits
-  WS   /v1/stream?token=..&avatar_id=..[&out_height=960&steps=..]
+  WS   /v1/stream?token=..&avatar_id=..[&steps=50&overlap=10&out_height=0&jpeg=90]
+        defaults = the final notebook settings (50 motion steps, overlap 10, full resolution);
+        lower latency for experiments: steps=10 and/or overlap=70 (Ditto's real-time cfg values)
         client -> server: binary = speech audio, PCM16 mono 16 kHz (any chunk size, as fast as you have it)
                           text   = {"type": "interrupt"} | {"type": "stats"} | {"type": "stop"}
         server -> client: text   = {"type": "ready", width, height, fps, sample_rate} | {"type": "stats", ...}
@@ -101,7 +103,8 @@ async def list_avatars(x_api_key: str = Header(None)):
 
 
 @app.websocket("/v1/stream")
-async def stream(ws: WebSocket, token: str = "", avatar_id: str = "", out_height: int = 960, steps: int = 0):
+async def stream(ws: WebSocket, token: str = "", avatar_id: str = "", out_height: int = 0, steps: int = 0,
+                 overlap: int = 0, jpeg: int = 90):
     await ws.accept()
     if token != API_KEY:
         await ws.close(code=4401, reason="invalid API key")
@@ -128,11 +131,12 @@ async def stream(ws: WebSocket, token: str = "", avatar_id: str = "", out_height
             loop.call_soon_threadsafe(put)
 
         t0 = time.time()
-        session = await asyncio.to_thread(StreamSession, state["sdk"], path, on_frame, out_height, 80, steps or None)
+        session = await asyncio.to_thread(StreamSession, state["sdk"], path, on_frame, out_height,
+                                          min(max(jpeg, 50), 100), steps or None, overlap or None)
         session.start()
         w, h = session.out_size
         await ws.send_text(json.dumps({"type": "ready", "width": w, "height": h, "fps": FPS, "sample_rate": SR,
-                                       "setup_s": round(time.time() - t0, 2)}))
+                                       "setup_s": round(time.time() - t0, 2), **session.settings}))
 
         async def sender():
             while True:

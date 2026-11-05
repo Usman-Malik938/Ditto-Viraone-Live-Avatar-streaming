@@ -15,11 +15,12 @@ local PC (your app, LLM + TTS)                GPU pod (this repo)
 - **One WebSocket per conversation.** The avatar is always live: when no speech is queued it's fed silence, so it idles (blinks, subtle motion), and speech starts on the next 0.2 s step.
 - **Send speech as fast as you get it,** for example from ElevenLabs with `output_format=pcm_16000`. The server plays it out in real time.
 - **Every frame carries its own audio,** so the player keeps lips and sound in sync.
-- **Final ViraOne settings, the same for every portrait:**
+- **Final ViraOne settings, the same for every portrait:** exactly the v6 FINAL Colab notebook values (the `FINAL GLOBAL SETTINGS` block in `server/avatar_stream.py`):
   - mouth 0.9, smoothing 3, Neutral emotion, own-face reference;
   - head 0.6 / 0.6 / 0.5;
-  - lips close in pauses (a rolling loudness gate on the lip points only);
-  - a causal head-drift stabiliser.
+  - 50 motion steps, overlap 10, seed 1024, max size 1280, crop 2.3;
+  - lips close in pauses: the notebook's `pause_alpha` formula on the lip points only;
+  - the head-drift stabiliser.
 
 ## API
 
@@ -29,7 +30,7 @@ local PC (your app, LLM + TTS)                GPU pod (this repo)
 | `GET /` | browser test viewer: enter the key, upload a portrait, connect, then speak a voice file |
 | `POST /v1/avatars` | upload a portrait (`multipart file`, header `x-api-key`) → `{"avatar_id"}` |
 | `GET /v1/avatars` | list the uploaded portraits |
-| `WS /v1/stream?token=KEY&avatar_id=ID[&out_height=960&steps=N]` | the live stream |
+| `WS /v1/stream?token=KEY&avatar_id=ID[&steps=50&overlap=10&out_height=0&jpeg=90]` | the live stream; the defaults are the final notebook settings, and `steps=10` / `overlap=70` (Ditto's real-time values) lower latency for experiments |
 
 **On `/v1/stream`:**
 
