@@ -1,0 +1,23 @@
+# Ditto's pinned packages (environment.yaml), install torch 2.5.1 cu121 first
+tensorrt==8.6.1
+tensorrt-bindings==8.6.1
+tensorrt-libs==8.6.1
+cuda-python==12.6.2.post1
+numpy==2.0.1
+cython==3.0.11
+librosa==0.10.2.post1
+opencv-python-headless==4.10.0.84
+imageio==2.36.1
+imageio-ffmpeg==0.5.1
+scikit-image==0.25.0
+scipy==1.15.0
+soundfile==0.13.0
+filetype
+tqdm
+colored
+polygraphy
+huggingface_hub<1
+# streaming server
+fastapi
+uvicorn[standard]
+python-multipart

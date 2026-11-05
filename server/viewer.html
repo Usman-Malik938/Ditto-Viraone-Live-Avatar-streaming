@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ViraOne Avatar Stream</title>
+<style>
+  :root { --bg: #f6f6f4; --fg: #1d1d1b; --muted: #6b6b66; --card: #ffffff; --line: #dcdcd6; --accent: #2f5bd3; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #151514; --fg: #ececea; --muted: #9a9a94; --card: #1f1f1d; --line: #33332f; --accent: #7d9cff; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
+  main { max-width: 1000px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) 320px; }
+  @media (max-width: 760px) { main { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  canvas { width: 100%; max-height: 80vh; object-fit: contain; background: #000; border-radius: 8px; display: block; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+  input, button { width: 100%; font: inherit; padding: 8px 10px; border-radius: 7px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
+  button { background: var(--accent); color: #fff; border: 0; cursor: pointer; margin-top: 10px; }
+  button.secondary { background: transparent; color: var(--fg); border: 1px solid var(--line); }
+  button:disabled { opacity: .5; cursor: default; }
+  pre { font-size: 12px; white-space: pre-wrap; color: var(--muted); margin: 10px 0 0; }
+  h1 { font-size: 17px; margin: 0 0 4px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="card"><canvas id="screen" width="540" height="960"></canvas></div>
+  <div class="card">
+    <h1>ViraOne avatar stream</h1>
+    <label for="key">API key</label><input id="key" type="password" autocomplete="off">
+    <label for="avatar">Portrait (upload once, or paste an avatar id)</label>
+    <input id="photo" type="file" accept="image/*"><input id="avatar" placeholder="avatar id" style="margin-top:6px">
+    <button id="connect">Connect</button>
+    <label for="voice">Voice file to speak (wav / mp3)</label><input id="voice" type="file" accept="audio/*">
+    <button id="speak" disabled>Speak</button>
+    <button id="interrupt" class="secondary" disabled>Interrupt</button>
+    <button id="disconnect" class="secondary" disabled>Disconnect</button>
+    <pre id="log">Not connected.</pre>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const log = s => { $("log").textContent = s; };
+let ws, ctx, playAt = 0, queue = [], stats = { frames: 0 }, speakSent = 0, firstSpeechFrame = null;
+try { $("key").value = localStorage.getItem("viraone_key") || ""; $("avatar").value = localStorage.getItem("viraone_avatar") || ""; } catch (e) {}
+
+async function uploadPhoto(key) {
+  const f = $("photo").files[0];
+  if (!f) return $("avatar").value.trim();
+  const fd = new FormData(); fd.append("file", f);
+  const r = await fetch("v1/avatars", { method: "POST", body: fd, headers: { "x-api-key": key } });
+  if (!r.ok) throw new Error("upload failed: " + r.status);
+  const id = (await r.json()).avatar_id; $("avatar").value = id; return id;
+}
+
+$("connect").onclick = async () => {
+  const key = $("key").value.trim();
+  try {
+    const id = await uploadPhoto(key);
+    try { localStorage.setItem("viraone_key", key); localStorage.setItem("viraone_avatar", id); } catch (e) {}
+    ctx = new AudioContext({ sampleRate: 16000 }); playAt = 0; queue = []; stats = { frames: 0 };
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    ws = new WebSocket(`${proto}://${location.host}${location.pathname.replace(/\/$/, "")}/v1/stream?token=${encodeURIComponent(key)}&avatar_id=${id}`);
+    ws.binaryType = "arraybuffer";
+    log("Connecting and preparing the avatar...");
+    ws.onmessage = onMessage;
+    ws.onclose = e => { log(`Disconnected (${e.code} ${e.reason || ""})`); setButtons(false); };
+  } catch (e) { log(String(e)); }
+};
+
+function setButtons(on) { $("speak").disabled = $("interrupt").disabled = $("disconnect").disabled = !on; $("connect").disabled = on; }
+
+function onMessage(ev) {
+  if (typeof ev.data === "string") {
+    const m = JSON.parse(ev.data);
+    if (m.type === "ready") { $("screen").width = m.width; $("screen").height = m.height; setButtons(true); log(`Ready ${m.width}x${m.height}, setup ${m.setup_s}s`); }
+    else if (m.type === "stats") log(JSON.stringify(m, null, 1));
+    return;
+  }
+  const dv = new DataView(ev.data), fid = dv.getUint32(1, true), n = dv.getUint32(5, true);
+  const jpg = new Blob([new Uint8Array(ev.data, 9, n)], { type: "image/jpeg" });
+  const pcm = new Int16Array(ev.data.slice(9 + n));
+  const now = ctx.currentTime;
+  if (playAt < now + 0.05) playAt = now + 0.25;          // (re)start with a 250 ms jitter buffer
+  const buf = ctx.createBuffer(1, pcm.length, 16000), ch = buf.getChannelData(0);
+  let loud = 0;
+  for (let i = 0; i < pcm.length; i++) { ch[i] = pcm[i] / 32768; loud = Math.max(loud, Math.abs(ch[i])); }
+  const src = ctx.createBufferSource(); src.buffer = buf; src.connect(ctx.destination); src.start(playAt);
+  if (speakSent && firstSpeechFrame === null && loud > 0.02) { firstSpeechFrame = performance.now(); log(`Speech-to-lips (send -> first speaking frame received): ${((firstSpeechFrame - speakSent) / 1000).toFixed(2)} s`); }
+  const t = playAt; playAt += 0.04; stats.frames++;
+  createImageBitmap(jpg).then(bmp => queue.push({ t, bmp }));
+}
+
+(function draw() {
+  if (ctx && queue.length) {
+    queue.sort((a, b) => a.t - b.t);
+    let cur = null;
+    while (queue.length && queue[0].t <= ctx.currentTime) cur = queue.shift();
+    if (cur) $("screen").getContext("2d").drawImage(cur.bmp, 0, 0, $("screen").width, $("screen").height);
+  }
+  requestAnimationFrame(draw);
+})();
+
+$("speak").onclick = async () => {
+  const f = $("voice").files[0]; if (!f) return log("Choose a voice file first.");
+  const decoded = await new AudioContext().decodeAudioData(await f.arrayBuffer());
+  const off = new OfflineAudioContext(1, Math.ceil(decoded.duration * 16000), 16000);
+  const s = off.createBufferSource(); s.buffer = decoded; s.connect(off.destination); s.start();
+  const mono = (await off.startRendering()).getChannelData(0);
+  const pcm = new Int16Array(mono.length);
+  for (let i = 0; i < mono.length; i++) pcm[i] = Math.max(-1, Math.min(1, mono[i])) * 32767;
+  speakSent = performance.now(); firstSpeechFrame = null;
+  for (let i = 0; i < pcm.length; i += 8000) ws.send(pcm.slice(i, i + 8000).buffer);
+  log(`Sent ${decoded.duration.toFixed(1)} s of speech...`);
+};
+$("interrupt").onclick = () => ws && ws.send(JSON.stringify({ type: "interrupt" }));
+$("disconnect").onclick = () => { if (ws) { ws.send(JSON.stringify({ type: "stats" })); setTimeout(() => ws.close(), 300); } };
+</script>
+</body>
+</html>
