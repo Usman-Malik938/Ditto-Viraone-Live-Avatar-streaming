@@ -19,6 +19,7 @@ tqdm
 colored
 polygraphy
 huggingface_hub<1
+hf_transfer        # RunPod's templates set HF_HUB_ENABLE_HF_TRANSFER=1
 # streaming server
 fastapi
 uvicorn[standard]
