@@ -18,6 +18,8 @@ echo "== packages (Ditto's environment.yaml pins + server)"
 uv pip install -q "torch==2.5.1" --index-url https://download.pytorch.org/whl/cu121
 uv pip install -q --extra-index-url https://pypi.nvidia.com --index-strategy unsafe-best-match \
   -r "$REPO/deploy/requirements-server.txt"
+# the `tensorrt` module itself: NVIDIA ships 8.6.1 only as a source package; its deps are installed above
+uv pip install -q --no-deps --no-build-isolation --extra-index-url https://pypi.nvidia.com "tensorrt==8.6.1"
 
 echo "== cuDNN 8 for TensorRT 8.6's plugins (torch keeps its own cuDNN 9)"
 CUDNN8="${CUDNN8:-/workspace/cudnn8}"
