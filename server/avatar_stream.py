@@ -4,10 +4,10 @@ Built on Ditto's online pipeline (stream_pipeline_online.StreamSDK, TensorRT, Hu
 A session keeps the avatar alive continuously: when no speech is queued it is fed silence, so the
 face idles (blinks, subtle motion) and speech starts on the next 0.2 s tick.
 
-Final global settings: exactly those of the v6 FINAL Colab notebook (Cell 6), applied to every portrait:
-mouth 0.9, smoothing 3, Neutral emotion, own-face reference, head 0.6 / 0.6 / 0.5, 50 motion steps,
-Ditto's offline overlap (10), seed 1024, lips close in pauses (lips-only vad_alpha, the notebook's
-pause_alpha formula), head-drift stabiliser, full resolution (max 1280).
+Approved look, identical to the v6 FINAL Colab notebook (Cell 6), applied to every portrait:
+mouth 0.9, smoothing 3, Neutral emotion, own-face reference, head 0.6 / 0.6 / 0.5, seed 1024,
+lips close in pauses (lips-only vad_alpha, the notebook's pause_alpha formula), head-drift stabiliser.
+Real-time speed (motion steps, overlap, output size) is set separately for latency; see below.
 """
 import math
 import os
@@ -32,16 +32,23 @@ TICK_SAMPLES = TICK_FRAMES * SPF
 SPLIT_LEN = int(sum(CHUNKSIZE) * 0.04 * SR) + 80   # 6480 samples per HuBERT window
 PREFIX = CHUNKSIZE[0] * SPF     # zeros prepended once, as in Ditto's inference.py
 
-# ===================== FINAL GLOBAL SETTINGS (identical to ditto_colab v6 FINAL, Cell 6) =====================
+# ============ APPROVED LOOK: expression + lip-sync settings, identical to ditto_colab v6 FINAL (Cell 6) ============
 MOUTH_GAIN = 0.90               # jaw opening calibrated to the client's real speaking video
 SMOOTHING = 3                   # smooth transitions between mouth shapes
 HEAD_NOD, HEAD_TURN, HEAD_TILT = 0.6, 0.6, 0.5   # subtle, natural head movement
 PAUSE_CLOSE = 1.0               # lips close in speech pauses (1 = fully, 0 = off)
 HEAD_STABILISE = True           # removes slow head/chin drift (keeps quick natural nods)
 DRIFT_WINDOW_S = 1.5            # head movement slower than this counts as drift
-SAMPLING_STEPS, MAX_SIZE, CROP_SCALE, SEED = 50, 1280, 2.3, 1024
-OVERLAP_V2 = 10                 # the notebook's offline cfg value; the real-time cfg default is 70
-# ==============================================================================================================
+MAX_SIZE, CROP_SCALE, SEED = 1280, 2.3, 1024
+
+# ============ REAL-TIME SPEED: chosen for latency (tested: 1.35 s speech-to-lips on the RTX 4090) ============
+# The notebook rendered offline with 50 steps / overlap 10 (motion in 2.8 s blocks, ~3 s+ latency live).
+# Ditto's real-time cfg uses 10 steps / overlap 70 (0.4 s blocks). Both stay overridable per stream
+# (?steps=..&overlap=..) for quality comparisons; keep late_ticks near 0 when raising steps.
+SAMPLING_STEPS = 10
+OVERLAP_V2 = 70
+OUT_HEIGHT, JPEG_QUALITY = 960, 80   # stream frame size / quality as tested (0 = full resolution)
+# ================================================================================================================
 
 FINAL_STYLE = {
     "smo_k_d": SMOOTHING,
@@ -178,7 +185,7 @@ class StreamSession:
     640 audio samples that belong to it, so the client can play picture and sound in sync.
     """
 
-    def __init__(self, sdk: AvatarSDK, source_path, on_frame, out_height=0, jpeg_quality=90,
+    def __init__(self, sdk: AvatarSDK, source_path, on_frame, out_height=OUT_HEIGHT, jpeg_quality=JPEG_QUALITY,
                  sampling_timesteps=None, overlap_v2=None, style=None):
         self.sdk, self.on_frame = sdk, on_frame
         self.out_height, self.jpeg_quality = out_height, jpeg_quality

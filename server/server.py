@@ -5,9 +5,9 @@ Endpoints
   GET  /                            browser test viewer (enter the API key on the page)
   POST /v1/avatars                  upload a portrait -> {"avatar_id"}
   GET  /v1/avatars                  list portraits
-  WS   /v1/stream?token=..&avatar_id=..[&steps=50&overlap=10&out_height=0&jpeg=90]
-        defaults = the final notebook settings (50 motion steps, overlap 10, full resolution);
-        lower latency for experiments: steps=10 and/or overlap=70 (Ditto's real-time cfg values)
+  WS   /v1/stream?token=..&avatar_id=..[&steps=10&overlap=70&out_height=960&jpeg=80]
+        the approved look (mouth, head, expression, pauses) is fixed; these only trade speed for quality:
+        defaults = the tested real-time setup (1.35 s speech-to-lips); notebook offline values: steps=50&overlap=10
         client -> server: binary = speech audio, PCM16 mono 16 kHz (any chunk size, as fast as you have it)
                           text   = {"type": "interrupt"} | {"type": "stats"} | {"type": "stop"}
         server -> client: text   = {"type": "ready", width, height, fps, sample_rate} | {"type": "stats", ...}
@@ -39,7 +39,7 @@ os.chdir(DITTO_DIR)
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile, WebSocket, WebSocketDisconnect  # noqa: E402
 from fastapi.responses import FileResponse  # noqa: E402
 
-from avatar_stream import AvatarSDK, StreamSession, SR, FPS  # noqa: E402
+from avatar_stream import AvatarSDK, StreamSession, SR, FPS, OUT_HEIGHT, JPEG_QUALITY  # noqa: E402
 
 IMG_EXT = (".jpg", ".jpeg", ".png", ".webp")
 state = {"sdk": None, "load_s": None, "busy": asyncio.Lock()}
@@ -103,8 +103,8 @@ async def list_avatars(x_api_key: str = Header(None)):
 
 
 @app.websocket("/v1/stream")
-async def stream(ws: WebSocket, token: str = "", avatar_id: str = "", out_height: int = 0, steps: int = 0,
-                 overlap: int = 0, jpeg: int = 90):
+async def stream(ws: WebSocket, token: str = "", avatar_id: str = "", out_height: int = OUT_HEIGHT, steps: int = 0,
+                 overlap: int = 0, jpeg: int = JPEG_QUALITY):
     await ws.accept()
     if token != API_KEY:
         await ws.close(code=4401, reason="invalid API key")

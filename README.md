@@ -18,9 +18,10 @@ local PC (your app, LLM + TTS)                GPU pod (this repo)
 - **Final ViraOne settings, the same for every portrait:** exactly the v6 FINAL Colab notebook values (the `FINAL GLOBAL SETTINGS` block in `server/avatar_stream.py`):
   - mouth 0.9, smoothing 3, Neutral emotion, own-face reference;
   - head 0.6 / 0.6 / 0.5;
-  - 50 motion steps, overlap 10, seed 1024, max size 1280, crop 2.3;
+  - seed 1024, max size 1280, crop 2.3;
   - lips close in pauses: the notebook's `pause_alpha` formula on the lip points only;
   - the head-drift stabiliser.
+- **Real-time speed, chosen separately for latency:** 10 motion steps and overlap 70 (Ditto's real-time values; 0.4 s motion blocks). The tested result is **1.35 s** from speech sent to the first speaking frame on the RTX 4090.
 
 ## API
 
@@ -30,7 +31,7 @@ local PC (your app, LLM + TTS)                GPU pod (this repo)
 | `GET /` | browser test viewer: enter the key, upload a portrait, connect, then speak a voice file |
 | `POST /v1/avatars` | upload a portrait (`multipart file`, header `x-api-key`) → `{"avatar_id"}` |
 | `GET /v1/avatars` | list the uploaded portraits |
-| `WS /v1/stream?token=KEY&avatar_id=ID[&steps=50&overlap=10&out_height=0&jpeg=90]` | the live stream; the defaults are the final notebook settings, and `steps=10` / `overlap=70` (Ditto's real-time values) lower latency for experiments |
+| `WS /v1/stream?token=KEY&avatar_id=ID[&steps=10&overlap=70&out_height=960&jpeg=80]` | the live stream; the defaults are the tested real-time setup (1.35 s speech-to-lips on the RTX 4090), and `steps=50&overlap=10` gives the notebook's offline values (slower) |
 
 **On `/v1/stream`:**
 
