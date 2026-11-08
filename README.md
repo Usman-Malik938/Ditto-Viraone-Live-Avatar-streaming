@@ -1,8 +1,8 @@
 # Ditto ViraOne: live avatar streaming
 
-A real-time talking-avatar backend for ViraOne. It turns a portrait and a live speech stream into a 25 fps avatar video, on one GPU in the cloud, such as a RunPod RTX 4090.
+The ViraOne live avatar: a voice chatbot (`chatbot/`) and a real-time talking-avatar backend. The avatar service turns a portrait and a live speech stream into a 25 fps avatar video, on one GPU in the cloud, such as a RunPod RTX 4090.
 
-It's built on [Ditto TalkingHead](https://github.com/antgroup/ditto-talkinghead) by Ant Group (Apache-2.0), using its real-time TensorRT pipeline (`stream_pipeline_online.py`). Ditto's original README is kept as [README_DITTO.md](README_DITTO.md). Its code is unchanged at upstream commit `c3e47ee`, and everything ViraOne-specific lives in `server/`, `client/` and `deploy/`.
+It's built on [Ditto TalkingHead](https://github.com/antgroup/ditto-talkinghead) by Ant Group (Apache-2.0), using its real-time TensorRT pipeline (`stream_pipeline_online.py`). Ditto's original README is kept as [README_DITTO.md](README_DITTO.md). Its code is unchanged at upstream commit `c3e47ee`, and everything ViraOne-specific lives in `server/`, `client/`, `deploy/` and `chatbot/`.
 
 ## How it works
 
@@ -23,6 +23,57 @@ local PC (your app, LLM + TTS)                GPU pod (this repo)
   - the head-drift stabiliser.
 - **Real-time speed, chosen separately for latency:** 10 motion steps and overlap 70 (Ditto's real-time values; 0.4 s motion blocks). The tested result is **1.35 s** from speech sent to the first speaking frame on the RTX 4090.
 
+## Run the whole pipeline: chatbot + avatar on one RunPod pod
+
+`chatbot/` is the voice chatbot: knowledge base, LLM (OpenAI), ElevenLabs speech-to-text and voice, and the LiveKit
+voice agent (see [chatbot/README.md](chatbot/README.md)). It sends the agent's voice to this avatar service over
+`ws://127.0.0.1:8090` (protocol 2), and LiveKit sends the face and voice to the browser together.
+
+```
+browser ──HTTPS──▶ test page (8080) ──▶ LiveKit token
+browser ◀──WebRTC over one TCP port──▶ LiveKit server (signalling: HTTPS 7880)
+                                          ▲
+voice agent: VAD + Scribe → knowledge base + gpt-4.1-mini → ElevenLabs (pcm_16000) → Ditto (127.0.0.1:8090) → frames + audio
+```
+
+RunPod passes no UDP, so calls send their audio and video over **one TCP port** with the same number inside and
+outside the pod (RunPod's port `70000` setting).
+
+**Pod:** RTX 4090, RunPod PyTorch template, 50 GB container disk, a 60 GB volume on `/workspace`, and these ports:
+
+| Port | Type | For |
+|---|---|---|
+| 8080 | HTTP | test console (`/`) and voice page (`/voice`) |
+| 7880 | HTTP | LiveKit signalling |
+| 70000 | TCP | call audio and video |
+| 22 | TCP | SSH |
+
+**On the pod, once (about 20 minutes):**
+
+```
+cd /workspace && git clone https://github.com/Usman-Malik938/Ditto-Viraone-Live-Avatar-streaming.git
+bash /workspace/Ditto-Viraone-Live-Avatar-streaming/deploy/runpod/setup.sh
+```
+
+**Add your keys** (the input is hidden; the keys go to `chatbot/.env`):
+
+```
+bash /workspace/Ditto-Viraone-Live-Avatar-streaming/deploy/runpod/set_key.sh OPENAI_API_KEY
+bash /workspace/Ditto-Viraone-Live-Avatar-streaming/deploy/runpod/set_key.sh ELEVENLABS_API_KEY
+```
+
+**Add the portrait:** copy the approved selfie to `chatbot/assets/avatar_portrait.jpg` (git-ignored).
+
+**Start or restart everything:**
+
+```
+bash /workspace/Ditto-Viraone-Live-Avatar-streaming/deploy/runpod/start.sh
+```
+
+It prints the test link: `https://<pod-id>-8080.proxy.runpod.net`. The browser asks for `WEB_ACCESS_PASSWORD` from `chatbot/.env` (any user name). Logs are in `/workspace/logs/`.
+
+If calls don't connect over TCP, switch to the LiveKit Cloud free tier instead: set `LIVEKIT_URL`, `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` in `chatbot/.env` (no code change).
+
 ## API
 
 | | |
@@ -31,16 +82,19 @@ local PC (your app, LLM + TTS)                GPU pod (this repo)
 | `GET /` | browser test viewer: enter the key, upload a portrait, connect, then speak a voice file |
 | `POST /v1/avatars` | upload a portrait (`multipart file`, header `x-api-key`) → `{"avatar_id"}` |
 | `GET /v1/avatars` | list the uploaded portraits |
-| `WS /v1/stream?token=KEY&avatar_id=ID[&steps=10&overlap=70&out_height=960&jpeg=80]` | the live stream; the defaults are the tested real-time setup (1.35 s speech-to-lips on the RTX 4090), and `steps=50&overlap=10` gives the notebook's offline values (slower) |
+| `WS /v1/stream?token=KEY&avatar_id=ID[&protocol=2&steps=10&overlap=70&out_height=960&jpeg=80]` | the live stream; the defaults are the tested real-time setup (1.35 s speech-to-lips on the RTX 4090), and `steps=50&overlap=10` gives the notebook's offline values (slower) |
 
 **On `/v1/stream`:**
 
 | Direction | Message |
 |---|---|
 | client → server, binary | speech audio, PCM16 mono 16 kHz, any chunk size |
-| client → server, text | `{"type":"interrupt"}` drops the queued speech (barge-in), `{"type":"stats"}` returns latency and fps, `{"type":"stop"}` ends the stream |
-| server → client, text | `{"type":"ready","width","height","fps","sample_rate","setup_s"}` |
-| server → client, binary | one frame: `b"F"` + uint32 `frame_idx` + uint32 `jpeg_len` + JPEG + 640 PCM16 samples |
+| client → server, text | `{"type":"segment_end"}` closes the current answer, `{"type":"interrupt"}` drops the queued speech and closes the answer (barge-in), `{"type":"stats"}` returns latency and fps, `{"type":"stop"}` ends the stream |
+| server → client, text | `{"type":"ready","protocol","width","height","fps","sample_rate","setup_s"}` |
+| server → client, binary, protocol 1 (default) | one frame: `b"F"` + uint32 `frame_idx` + uint32 `jpeg_len` + JPEG + 640 PCM16 samples |
+| server → client, binary, `protocol=2` | one frame: `b"V"` + uint32 `frame_idx` + uint32 `answer` + uint32 `jpeg_len` + JPEG + 640 PCM16 samples |
+
+Protocol 2 is what the [ai_avatar](https://github.com/musama020/ai_avatar) voice agent uses. Answers are numbered 1, 2, ... in the order their speech is sent, and each `segment_end` or `interrupt` closes one. A frame carries the number of the answer its first audio sample belongs to; 0 means idle. Frames of an interrupted answer that were already in the pipeline still arrive, with silent audio and answer 0.
 
 There's one stream per GPU at a time; a second connection is refused with code 4409. The pod's web link is public, so every call needs the API key.
 
@@ -73,7 +127,9 @@ The client prints the avatar setup time, the **speech-to-lips latency** and the 
 | `server/server.py` | the FastAPI app |
 | `server/viewer.html` | the browser test viewer |
 | `client/client.py` | local test client |
-| `deploy/` | pod setup script, pinned requirements and start script |
+| `deploy/` | avatar-only pod setup and start scripts, pinned requirements |
+| `deploy/runpod/` | the whole pipeline on one pod: `setup.sh`, `set_key.sh`, `start.sh`, the `.env` template |
+| `chatbot/` | the voice chatbot (knowledge base, LLM, ElevenLabs, LiveKit agent, test pages) |
 | everything else | Ditto upstream (`core/`, `stream_pipeline_*.py`, `inference.py`, `scripts/`) |
 
 ## License

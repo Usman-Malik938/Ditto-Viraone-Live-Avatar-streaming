@@ -10,7 +10,8 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV="${VENV:-/workspace/venv310}"
 echo "== repo $REPO, venv $VENV"; date
 
-pip install -q uv
+# Newer RunPod images (Ubuntu 24.04) refuse a plain system pip install
+command -v uv > /dev/null || pip install -q uv 2> /dev/null || pip install -q --break-system-packages uv
 [ -d "$VENV" ] || uv venv "$VENV" --python 3.10 --seed -q
 source "$VENV/bin/activate"
 

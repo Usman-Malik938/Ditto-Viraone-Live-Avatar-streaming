@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ViraOne Voice</title>
+<meta name="description" content="Talk to the Smart4U voice agent through LiveKit.">
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Schibsted+Grotesk:wght@400;500;600&display=swap">
+<style>
+:root {
+  --paper: #f2f4f3;
+  --surface: #ffffff;
+  --ink: #0f1d1a;
+  --muted: #5e6f6a;
+  --line: #d8dfdc;
+  --signal: #2a55e5;
+  --signal-wash: #eaefff;
+  --voice: #0f8b8d;
+  --listen: #7c8f89;
+  --error: #b3362f;
+  --font-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --font-body: "Schibsted Grotesk", "Segoe UI", system-ui, sans-serif;
+  --radius: 10px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #0d1413;
+    --surface: #141e1c;
+    --ink: #e5ece9;
+    --muted: #93a39e;
+    --line: #26322f;
+    --signal: #7c9bff;
+    --signal-wash: #1a2340;
+    --voice: #45c2c4;
+    --listen: #6b7f79;
+    --error: #ef8a83;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  display: flex;
+  justify-content: center;
+  padding: 24px 16px;
+}
+main { width: 100%; max-width: 640px; display: flex; flex-direction: column; gap: 16px; }
+h1 { font-family: var(--font-display); font-size: 1.5rem; margin: 0; }
+.controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+select, button {
+  font: inherit;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  padding: 10px 14px;
+}
+button.primary { background: var(--signal); border-color: var(--signal); color: #fff; font-weight: 600; cursor: pointer; }
+button.primary:disabled { opacity: 0.6; cursor: default; }
+.status {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 14px; border-radius: var(--radius);
+  background: var(--surface); border: 1px solid var(--line);
+}
+.status-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--line); flex: none; }
+.status[data-state="listening"] .status-dot { background: var(--listen); }
+.status[data-state="thinking"] .status-dot { background: var(--signal); animation: pulse 1s infinite; }
+.status[data-state="speaking"] .status-dot { background: var(--voice); animation: pulse 0.6s infinite; }
+.status[data-state="error"] { color: var(--error); }
+@keyframes pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .status-dot { animation: none !important; } }
+.stage {
+  position: relative; height: clamp(240px, 46vh, 520px); border-radius: var(--radius); overflow: hidden;
+  background: #0b1110; display: grid; place-items: center;
+  box-shadow: inset 0 0 0 3px transparent; transition: box-shadow 0.25s ease;
+}
+.stage[data-state="listening"] { box-shadow: inset 0 0 0 3px var(--listen); }
+.stage[data-state="thinking"] { box-shadow: inset 0 0 0 3px var(--signal); }
+.stage[data-state="speaking"] { box-shadow: inset 0 0 0 3px var(--voice); }
+.stage-video, .stage-still { grid-area: 1 / 1; width: 100%; height: 100%; }
+/* Out of the grid's flow: a tall video's own size would grow the row and show only its top */
+.stage-video { position: absolute; inset: 0; object-fit: contain; }
+.stage-still { display: grid; place-items: center; background-size: contain; background-position: center; background-repeat: no-repeat; }
+.stage-still.has-portrait .stage-initials { display: none; }
+.stage-initials {
+  width: 96px; height: 96px; border-radius: 50%; background: var(--paper); color: var(--ink);
+  display: grid; place-items: center; font: 700 1.6rem/1 var(--font-display);
+}
+.stage-note {
+  position: absolute; left: 12px; right: 12px; bottom: 12px; margin: 0; padding: 6px 10px; border-radius: 8px;
+  background: rgba(11, 17, 16, 0.78); color: #e5ece9; font-size: 0.85rem; text-align: center;
+}
+.transcript {
+  display: flex; flex-direction: column; gap: 10px;
+  min-height: 200px; padding: 14px; border-radius: var(--radius);
+  background: var(--surface); border: 1px solid var(--line); overflow-y: auto;
+}
+.line { max-width: 85%; padding: 10px 12px; border-radius: var(--radius); line-height: 1.45; }
+.line-agent { background: var(--signal-wash); align-self: flex-start; }
+.line-user { background: var(--paper); border: 1px solid var(--line); align-self: flex-end; }
+.line.is-partial { opacity: 0.7; }
+.hint { color: var(--muted); font-size: 0.9rem; margin: 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>ViraOne voice</h1>
+  <div class="controls">
+    <select id="language" aria-label="Conversation language"></select>
+    <button id="toggle" class="primary" type="button">Start talking</button>
+  </div>
+  <div id="stage" class="stage" data-state="idle">
+    <div class="stage-still" id="stage-still" aria-hidden="true"><span class="stage-initials">S4U</span></div>
+    <video class="stage-video" id="avatar-video" autoplay playsinline muted hidden aria-label="Smart4U avatar"></video>
+    <p class="stage-note" id="stage-note" hidden></p>
+  </div>
+  <div id="status" class="status" data-state="idle" role="status" aria-live="polite">
+    <span class="status-dot"></span><span id="status-text">Press Start talking. Your browser will ask for the microphone.</span>
+  </div>
+  <div id="transcript" class="transcript" aria-label="Conversation"></div>
+  <p class="hint">Speak any time, even while the agent talks: it stops and listens. A high bell means your turn, a low bell means the agent is answering.</p>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/livekit-client@2.22.4/dist/livekit-client.umd.js"></script>
+<script>
+const STATUS_TEXT = {
+  idle: "Press Start talking. Your browser will ask for the microphone.",
+  connecting: "Connecting…",
+  initializing: "Waiting for the agent to join…",
+  listening: "Listening. Just speak.",
+  thinking: "Thinking…",
+  speaking: "Speaking. Talk to interrupt."
+};
+
+/* Shows each spoken line as LiveKit streams its transcription; one bubble per segment, updated in place. */
+class TranscriptView {
+  constructor(container) {
+    this.container = container;
+    this.linesBySegment = new Map();
+  }
+
+  clear() {
+    this.container.textContent = "";
+    this.linesBySegment.clear();
+  }
+
+  async readStream(reader, isAgent) {
+    const segmentId = reader.info.attributes["lk.segment_id"] || reader.info.id;
+    const line = this.findOrCreateLine(segmentId, isAgent);
+    let text = "";
+    for await (const chunk of reader) {
+      text += chunk;
+      line.textContent = text;
+      this.container.scrollTop = this.container.scrollHeight;
+    }
+    if (reader.info.attributes["lk.transcription_final"] === "true") {
+      line.classList.remove("is-partial");
+    }
+  }
+
+  findOrCreateLine(segmentId, isAgent) {
+    let line = this.linesBySegment.get(segmentId);
+    if (!line) {
+      line = document.createElement("div");
+      line.className = "line is-partial";
+      if (isAgent) {
+        line.classList.add("line-agent");
+      } else {
+        line.classList.add("line-user");
+      }
+      this.linesBySegment.set(segmentId, line);
+      this.container.appendChild(line);
+    }
+    return line;
+  }
+}
+
+/* The video area: the live avatar when the call has one, otherwise the still portrait (or the initials). */
+class AvatarStageView {
+  constructor() {
+    this.stage = document.getElementById("stage");
+    this.still = document.getElementById("stage-still");
+    this.video = document.getElementById("avatar-video");
+    this.note = document.getElementById("stage-note");
+    this.videoTrack = null;
+    this.video.addEventListener("playing", this.handleVideoPlaying.bind(this));
+  }
+
+  showPortrait(portraitUrl) {
+    if (portraitUrl) {
+      this.still.style.backgroundImage = "url('" + portraitUrl + "')";
+      this.still.classList.add("has-portrait");
+    }
+  }
+
+  setAgentState(agentState) {
+    this.stage.dataset.state = agentState;
+  }
+
+  showAvatarAvailability(avatarState) {
+    if (avatarState === "on" && !this.videoTrack) {
+      this.showNote("The avatar is getting ready…");
+    } else if (avatarState === "unavailable") {
+      this.showNote("The avatar is unavailable right now, so this call is voice only.");
+    } else if (avatarState === "off") {
+      this.note.hidden = true;
+    }
+  }
+
+  showNote(text) {
+    this.note.textContent = text;
+    this.note.hidden = false;
+  }
+
+  attachVideo(track) {
+    this.videoTrack = track;
+    track.attach(this.video);
+  }
+
+  handleVideoPlaying() {
+    this.video.hidden = false;
+    this.still.hidden = true;
+    this.note.hidden = true;
+  }
+
+  detachVideo() {
+    if (this.videoTrack) {
+      this.videoTrack.detach(this.video);
+      this.videoTrack = null;
+    }
+    this.video.hidden = true;
+    this.still.hidden = false;
+  }
+
+  reset() {
+    this.detachVideo();
+    this.note.hidden = true;
+    this.stage.dataset.state = "idle";
+  }
+}
+
+/* One voice call: fetches a token, joins a fresh LiveKit room with the mic on, and plays the agent's audio tracks. */
+class VoiceCall {
+  constructor(transcriptView, stageView, onStateChange) {
+    this.transcriptView = transcriptView;
+    this.stageView = stageView;
+    this.onStateChange = onStateChange;
+    this.room = null;
+    this.avatarStateAttribute = "";
+  }
+
+  isActive() {
+    return this.room !== null;
+  }
+
+  async start(languageCode, avatarStateAttribute) {
+    this.avatarStateAttribute = avatarStateAttribute;
+    this.onStateChange("connecting");
+    const query = "session_id=" + encodeURIComponent(crypto.randomUUID()) + "&language=" + encodeURIComponent(languageCode) + "&speak_greeting=true";
+    const response = await fetch("/api/voice-token?" + query);
+    const connection = await response.json();
+    if (!response.ok) {
+      throw new Error(connection.error || ("status " + response.status));
+    }
+    const room = new LivekitClient.Room({ adaptiveStream: true });
+    this.room = room;
+    room.on(LivekitClient.RoomEvent.TrackSubscribed, this.handleTrackSubscribed.bind(this));
+    room.on(LivekitClient.RoomEvent.TrackUnsubscribed, this.handleTrackUnsubscribed.bind(this));
+    room.on(LivekitClient.RoomEvent.ParticipantAttributesChanged, this.handleAttributesChanged.bind(this));
+    room.on(LivekitClient.RoomEvent.ParticipantConnected, this.handleParticipantConnected.bind(this));
+    room.on(LivekitClient.RoomEvent.Disconnected, this.handleDisconnected.bind(this));
+    room.registerTextStreamHandler("lk.transcription", this.handleTranscription.bind(this));
+    this.onStateChange("initializing");
+    await room.connect(connection.url, connection.token);
+    await room.localParticipant.setMicrophoneEnabled(true, { echoCancellation: true, noiseSuppression: true, autoGainControl: true });
+    for (const participant of room.remoteParticipants.values()) {
+      this.showAgentState(participant.attributes["lk.agent.state"]);
+      this.showAvatarState(participant.attributes[this.avatarStateAttribute]);
+    }
+  }
+
+  /* Changes only report a new value, so the agent's state at the moment it joins is read here. */
+  handleParticipantConnected(participant) {
+    this.showAgentState(participant.attributes["lk.agent.state"]);
+    this.showAvatarState(participant.attributes[this.avatarStateAttribute]);
+  }
+
+  showAgentState(agentState) {
+    if (agentState && this.room) {
+      this.stageView.setAgentState(agentState);
+      this.onStateChange(agentState);
+    }
+  }
+
+  showAvatarState(avatarState) {
+    if (avatarState && this.room) {
+      this.stageView.showAvatarAvailability(avatarState);
+    }
+  }
+
+  async stop() {
+    if (this.room) {
+      const room = this.room;
+      this.room = null;
+      await room.disconnect();
+    }
+    this.finishCall();
+  }
+
+  finishCall() {
+    for (const element of document.querySelectorAll("audio")) {
+      element.remove();
+    }
+    this.stageView.reset();
+    this.onStateChange("idle");
+  }
+
+  /* With the avatar, its audio track carries the voice and its video track the face; they are sent as a synced pair. */
+  handleTrackSubscribed(track) {
+    if (track.kind === LivekitClient.Track.Kind.Audio) {
+      const element = track.attach();
+      element.hidden = true;
+      document.body.appendChild(element);
+    } else if (track.kind === LivekitClient.Track.Kind.Video) {
+      this.stageView.attachVideo(track);
+    }
+  }
+
+  handleTrackUnsubscribed(track) {
+    if (track.kind === LivekitClient.Track.Kind.Video) {
+      this.stageView.detachVideo();
+    }
+  }
+
+  handleAttributesChanged(changedAttributes, participant) {
+    if (this.room && participant !== this.room.localParticipant) {
+      this.showAgentState(changedAttributes["lk.agent.state"]);
+      this.showAvatarState(changedAttributes[this.avatarStateAttribute]);
+    }
+  }
+
+  handleTranscription(reader, participantInfo) {
+    const isAgent = participantInfo.identity !== this.room.localParticipant.identity;
+    this.transcriptView.readStream(reader, isAgent);
+  }
+
+  handleDisconnected() {
+    this.room = null;
+    this.finishCall();
+  }
+}
+
+class VoicePage {
+  constructor() {
+    this.languageSelect = document.getElementById("language");
+    this.toggleButton = document.getElementById("toggle");
+    this.status = document.getElementById("status");
+    this.statusText = document.getElementById("status-text");
+    this.transcriptView = new TranscriptView(document.getElementById("transcript"));
+    this.stageView = new AvatarStageView();
+    this.call = new VoiceCall(this.transcriptView, this.stageView, this.showState.bind(this));
+    this.avatarStateAttribute = "";
+    this.toggleButton.addEventListener("click", this.handleToggle.bind(this));
+  }
+
+  async loadLanguages() {
+    const response = await fetch("/api/settings");
+    const settings = await response.json();
+    for (const language of settings.languages) {
+      const option = document.createElement("option");
+      option.value = language.code;
+      option.textContent = language.name;
+      this.languageSelect.appendChild(option);
+    }
+    this.languageSelect.value = settings.default_language_code;
+    this.avatarStateAttribute = settings.avatar_state_attribute;
+    this.stageView.showPortrait(settings.avatar_portrait_url);
+    if (!settings.voice_enabled) {
+      this.toggleButton.disabled = true;
+      this.showError(settings.voice_disabled_reason);
+    }
+  }
+
+  async handleToggle() {
+    this.toggleButton.disabled = true;
+    try {
+      if (this.call.isActive()) {
+        await this.call.stop();
+      } else {
+        this.transcriptView.clear();
+        await this.call.start(this.languageSelect.value, this.avatarStateAttribute);
+      }
+    } catch (callError) {
+      console.error(callError);
+      await this.call.stop();
+      this.showError("Could not connect: " + callError.message);
+    }
+    this.toggleButton.disabled = false;
+  }
+
+  showState(state) {
+    this.status.dataset.state = state;
+    this.statusText.textContent = STATUS_TEXT[state] || state;
+    if (this.call.isActive()) {
+      this.toggleButton.textContent = "End call";
+      this.languageSelect.disabled = true;
+    } else {
+      this.toggleButton.textContent = "Start talking";
+      this.languageSelect.disabled = false;
+    }
+  }
+
+  showError(message) {
+    this.status.dataset.state = "error";
+    this.statusText.textContent = message;
+  }
+}
+
+const voicePage = new VoicePage();
+voicePage.loadLanguages();
+</script>
+</body>
+</html>

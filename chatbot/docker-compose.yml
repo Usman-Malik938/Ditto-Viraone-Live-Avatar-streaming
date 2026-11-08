@@ -1,0 +1,44 @@
+# Web chat + a Cloudflare quick tunnel that gives it a public HTTPS link. Start it with ./start.sh.
+services:
+  chatbot:
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM python:3.14-slim
+        WORKDIR /app
+        ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+        # CPU-only torch first; the default wheel pulls gigabytes of unused CUDA libraries.
+        RUN pip install torch==2.14.1 --index-url https://download.pytorch.org/whl/cpu
+        COPY requirements.txt .
+        RUN pip install -r requirements.txt
+        COPY . .
+    env_file: .env
+    environment:
+      WEB_SERVER_HOST: 0.0.0.0
+      WEB_SERVER_PORT: "8080"
+      # Shell value first, then .env, so a test run can switch ElevenLabs off without editing .env.
+      ELEVENLABS_ENABLED: ${ELEVENLABS_ENABLED:-true}
+    # The knowledge base is indexed once into the volume; later starts reuse it.
+    command: sh -c "if [ ! -f qdrant_data/meta.json ]; then python main.py index-knowledge; fi && exec python main.py web"
+    volumes:
+      - ./models:/app/models
+      - qdrant_data:/app/qdrant_data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/settings')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      # The first start downloads about 5 GB of models, so allow it plenty of time.
+      start_period: 60m
+    restart: unless-stopped
+
+  tunnel:
+    image: cloudflare/cloudflared:2026.10.7
+    command: tunnel --no-autoupdate --url http://chatbot:8080
+    depends_on:
+      chatbot:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  qdrant_data:

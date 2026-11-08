@@ -1,0 +1,34 @@
+{
+  "contact_buttons": [
+    {
+      "kind": "phone",
+      "label": {
+        "en": "Phone",
+        "pl": "Telefon"
+      },
+      "target": "tel:+48737995688"
+    },
+    {
+      "kind": "email",
+      "label": {
+        "en": "Email",
+        "pl": "E-mail"
+      },
+      "target": "mailto:info@smart4u.io"
+    },
+    {
+      "kind": "whatsapp",
+      "label": {
+        "en": "WhatsApp",
+        "pl": "WhatsApp"
+      },
+      "target": "https://wa.me/48737995688"
+    }
+  ],
+  "fixed_messages": {
+    "decline": {
+      "en": "I can only help with questions about Smart4U's services, such as websites, advertising, videos and SCARD. What would you like to know?",
+      "pl": "Mogę pomóc tylko w sprawach usług Smart4U, takich jak strony internetowe, reklama, wideo i SCARD. O co chcesz zapytać?"
+    }
+  }
+}

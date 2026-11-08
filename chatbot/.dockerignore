@@ -1,0 +1,13 @@
+.env
+.env.*
+.venv/
+venv/
+models/
+qdrant_data/
+__pycache__/
+*.pyc
+.git/
+.playwright-mcp/
+evaluation/output/
+# Local LiveKit server binary (Windows build, not used in the Linux image)
+tools/

@@ -1,0 +1,32 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Downloaded model weights
+models/
+
+# Avatar face photos
+assets/*
+!assets/.gitkeep
+
+# Evaluation recordings and reports
+evaluation/output/
+
+# Spoken reply MP3s from the old test console (no longer written; kept so old local files stay out of git)
+speech_output/
+
+# Local vector database
+qdrant_data/
+
+# Playwright MCP snapshots and logs
+.playwright-mcp/
+
+# Local LiveKit server binary (downloaded, not built here)
+tools/

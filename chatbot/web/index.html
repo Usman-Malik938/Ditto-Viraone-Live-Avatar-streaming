@@ -1,0 +1,1426 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ViraOne Test Console</title>
+<meta name="description" content="Ask the Smart4U avatar questions and see which knowledge it used and how fast it answered.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='16' fill='%230f1d1a'/%3E%3Crect x='8' y='13' width='3' height='6' rx='1.5' fill='%232a55e5'/%3E%3Crect x='14.5' y='8' width='3' height='16' rx='1.5' fill='%232a55e5'/%3E%3Crect x='21' y='11' width='3' height='10' rx='1.5' fill='%232a55e5'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Schibsted+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: conversation column (avatar strip, transcript, composer) beside an inspector for the selected reply */
+:root {
+  --paper: #f2f4f3;
+  --surface: #ffffff;
+  --ink: #0f1d1a;
+  --muted: #5e6f6a;
+  --line: #d8dfdc;
+  --signal: #2a55e5;
+  --signal-soft: #a9baf5;
+  --signal-wash: #eaefff;
+  --budget: #c97a12;
+  --ok: #1f7f55;
+  --error: #b3362f;
+  --error-wash: #fbeceb;
+  --listen: #7c8f89;
+  --voice: #0f8b8d;
+  --font-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --font-body: "Schibsted Grotesk", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  --radius: 10px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #0d1413;
+    --surface: #141e1c;
+    --ink: #e5ece9;
+    --muted: #93a39e;
+    --line: #26322f;
+    --signal: #7c9bff;
+    --signal-soft: #3c4f8f;
+    --signal-wash: #1a2340;
+    --budget: #f0a940;
+    --ok: #5cc795;
+    --error: #ef8a83;
+    --error-wash: #3a1d1b;
+    --listen: #6b7f79;
+    --voice: #45c2c4;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 15px/1.55 var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+button, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+.app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
+
+/* Header */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  padding: 12px max(20px, env(safe-area-inset-right)) 12px max(20px, env(safe-area-inset-left));
+  border-bottom: 1px solid var(--line); background: var(--surface);
+}
+.brand { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.brand-name { font: 700 1.25rem/1 var(--font-display); letter-spacing: -0.02em; margin: 0; }
+.brand-note { color: var(--muted); font-size: 0.85rem; }
+.run-facts { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fact {
+  font: 500 0.75rem/1 var(--font-mono); color: var(--muted);
+  border: 1px solid var(--line); border-radius: 99px; padding: 6px 10px; white-space: nowrap;
+}
+.language-select { background: var(--surface); color: var(--ink); cursor: pointer; padding-right: 6px; }
+.language-select:hover { border-color: var(--muted); }
+.reply-model { margin: -10px 0 16px; color: var(--muted); font-size: 0.8rem; }
+.button-quiet {
+  border: 1px solid var(--line); background: transparent; border-radius: 8px;
+  padding: 7px 12px; font-weight: 500; font-size: 0.85rem; cursor: pointer;
+}
+.button-quiet:hover { border-color: var(--muted); }
+
+/* Main grid */
+.workspace {
+  display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(320px, 1fr);
+  min-height: 0;
+}
+.conversation { display: grid; grid-template-rows: auto 1fr auto; min-height: 0; border-right: 1px solid var(--line); }
+
+/* Avatar stage: the live video (or the still portrait) with the status row under it */
+.avatar-stage { border-bottom: 1px solid var(--line); }
+.stage-media {
+  position: relative; height: clamp(220px, 40vh, 440px); background: #0b1110;
+  display: grid; place-items: center; overflow: hidden;
+  box-shadow: inset 0 0 0 3px transparent; transition: box-shadow 0.25s ease;
+}
+.avatar-stage[data-state="listening"] .stage-media { box-shadow: inset 0 0 0 3px var(--listen); }
+.avatar-stage[data-state="thinking"] .stage-media { box-shadow: inset 0 0 0 3px var(--signal); }
+.avatar-stage[data-state="speaking"] .stage-media { box-shadow: inset 0 0 0 3px var(--voice); }
+.stage-video, .stage-still { grid-area: 1 / 1; width: 100%; height: 100%; }
+/* Out of the grid's flow: a tall video's own size would grow the row and show only its top */
+.stage-video { position: absolute; inset: 0; object-fit: contain; }
+.stage-still { display: grid; place-items: center; background-size: contain; background-position: center; background-repeat: no-repeat; }
+.stage-still.has-portrait .stage-initials { display: none; }
+.stage-initials {
+  width: 96px; height: 96px; border-radius: 50%; background: var(--paper); color: var(--ink);
+  display: grid; place-items: center; font: 700 1.6rem/1 var(--font-display); letter-spacing: -0.02em;
+}
+.stage-note {
+  position: absolute; left: 12px; right: 12px; bottom: 12px; margin: 0; padding: 6px 10px; border-radius: 8px;
+  background: rgba(11, 17, 16, 0.78); color: #e5ece9; font-size: 0.8rem; text-align: center;
+}
+.avatar-strip {
+  display: flex; align-items: center; gap: 14px;
+  padding: 12px 24px;
+}
+.portrait {
+  position: relative; flex: 0 0 auto; width: 52px; height: 52px; border-radius: 50%;
+  background: var(--ink); color: var(--paper);
+  display: grid; place-items: center; font: 700 0.95rem/1 var(--font-display); letter-spacing: -0.02em;
+}
+.avatar-meta { min-width: 0; flex: 1 1 auto; }
+.avatar-name { margin: 0; font-weight: 600; }
+.avatar-status { margin: 0; color: var(--muted); font-size: 0.85rem; }
+.voiceprint { display: flex; align-items: center; gap: 3px; height: 28px; flex: 0 0 auto; }
+.voiceprint span {
+  display: block; width: 3px; height: 6px; border-radius: 2px; background: var(--line);
+  transition: background-color 0.2s ease;
+}
+.is-answering .voiceprint span { background: var(--signal); animation: speak 0.9s ease-in-out infinite; }
+.is-speaking .voiceprint span { background: var(--voice); animation: speak 0.7s ease-in-out infinite; }
+.is-listening .voiceprint span { background: var(--error); animation: speak 1.1s ease-in-out infinite; }
+.is-searching .voiceprint span { background: var(--signal-soft); animation: scan 1.2s ease-in-out infinite; }
+.voiceprint span:nth-child(2) { animation-delay: 0.1s; }
+.voiceprint span:nth-child(3) { animation-delay: 0.25s; }
+.voiceprint span:nth-child(4) { animation-delay: 0.05s; }
+.voiceprint span:nth-child(5) { animation-delay: 0.3s; }
+.voiceprint span:nth-child(6) { animation-delay: 0.15s; }
+.voiceprint span:nth-child(7) { animation-delay: 0.2s; }
+@keyframes speak { 0%, 100% { height: 6px; } 50% { height: 26px; } }
+@keyframes scan { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+
+/* Transcript */
+.transcript { overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+.message { max-width: min(560px, 88%); }
+.message-user { align-self: flex-end; }
+.message-user .bubble { background: var(--ink); color: var(--paper); border-radius: var(--radius) var(--radius) 3px var(--radius); }
+.message-avatar { align-self: flex-start; }
+.bubble { padding: 10px 14px; border-radius: var(--radius) var(--radius) var(--radius) 3px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.message-avatar .bubble { background: var(--surface); border: 1px solid var(--line); }
+button.bubble { text-align: left; cursor: pointer; width: 100%; }
+button.bubble:hover { border-color: var(--muted); }
+button.bubble[aria-pressed="true"] { border-color: var(--signal); box-shadow: 0 0 0 1px var(--signal); }
+.bubble.is-streaming::after {
+  content: ""; display: inline-block; width: 7px; height: 1em; margin-left: 2px; vertical-align: -2px;
+  background: var(--signal); animation: blink 1s steps(1) infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }
+.message-caption { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 5px; font-size: 0.75rem; color: var(--muted); }
+.message-caption span { white-space: nowrap; }
+.message-error .bubble { background: var(--error-wash); color: var(--error); border: 1px solid transparent; }
+
+/* Composer */
+.composer-area { border-top: 1px solid var(--line); padding: 14px 24px 18px; background: var(--surface); display: grid; gap: 10px; }
+.suggestions { display: flex; flex-wrap: wrap; gap: 8px; }
+.suggestion {
+  flex: 0 0 auto; border: 1px solid var(--line); background: var(--paper); border-radius: 99px;
+  padding: 6px 12px; font-size: 0.85rem; cursor: pointer; white-space: nowrap;
+}
+.suggestion:hover { border-color: var(--signal); color: var(--signal); }
+.composer { display: flex; gap: 10px; align-items: flex-end; }
+.composer textarea {
+  flex: 1 1 auto; min-width: 0; resize: none; max-height: 160px;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--paper);
+  padding: 11px 14px; line-height: 1.45; overflow-y: hidden;
+}
+.composer textarea:focus-visible { outline-offset: 0; }
+.send {
+  flex: 0 0 auto; border: 0; border-radius: var(--radius); background: var(--signal); color: #fff;
+  padding: 11px 18px; font-weight: 600; cursor: pointer;
+}
+.send:disabled { opacity: 0.45; cursor: not-allowed; }
+.talk {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 8px;
+  border: 1px solid var(--ink); border-radius: var(--radius); background: var(--ink); color: var(--paper);
+  padding: 10px 16px; font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.talk:disabled { opacity: 0.45; cursor: not-allowed; }
+.mute {
+  flex: 0 0 auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--paper);
+  padding: 10px 14px; font-weight: 500; cursor: pointer; white-space: nowrap;
+}
+.mute[aria-pressed="true"] { border-color: var(--error); color: var(--error); }
+.talk-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--error); flex: 0 0 auto; }
+.talk[aria-pressed="true"] { background: var(--error); border-color: var(--error); color: #fff; }
+.talk[aria-pressed="true"] .talk-dot { background: #fff; animation: scan 1s ease-in-out infinite; }
+.voice-notice { margin: 0; font-size: 0.8rem; color: var(--budget); }
+.message-meta { margin-top: 5px; font-size: 0.75rem; color: var(--muted); text-align: right; }
+.composer-hint { margin: 0; font-size: 0.75rem; color: var(--muted); }
+
+/* Inspector */
+.inspector { overflow-y: auto; padding: 24px; display: grid; gap: 28px; align-content: start; min-height: 0; }
+.panel-label {
+  margin: 0 0 12px; font: 600 0.72rem/1 var(--font-body); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);
+}
+.selected-question { margin: 0 0 16px; font: 600 1.15rem/1.3 var(--font-display); letter-spacing: -0.01em; text-wrap: balance; }
+
+/* Signature: the latency ruler */
+.ruler { position: relative; padding-top: 22px; }
+.ruler-track { position: relative; height: 14px; border-radius: 4px; background: var(--line); overflow: hidden; }
+.ruler-segment { position: absolute; top: 0; bottom: 0; transition: width 0.35s ease, left 0.35s ease; }
+.segment-wait { background: color-mix(in srgb, var(--listen) 45%, transparent); }
+.segment-search { background: var(--signal-soft); }
+.segment-model { background: var(--signal); }
+.segment-voice { background: var(--voice); }
+.segment-face { background: color-mix(in srgb, var(--voice) 45%, var(--ink)); }
+.segment-rest { background: color-mix(in srgb, var(--signal) 22%, transparent); }
+.ruler-target { position: absolute; top: 0; bottom: -6px; width: 2px; background: var(--budget); }
+.ruler-target-label {
+  position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap;
+  font: 500 0.7rem/1 var(--font-mono); color: var(--budget);
+}
+.ruler-scale { display: flex; justify-content: space-between; margin-top: 8px; font-size: 0.7rem; color: var(--muted); }
+.mini-ruler { position: relative; height: 4px; width: 120px; border-radius: 2px; background: var(--line); overflow: hidden; align-self: center; }
+.mini-ruler .ruler-segment { transition: none; }
+
+.timings { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 12px; margin-top: 18px; }
+.timing { display: grid; gap: 2px; min-width: 0; }
+.timing-label { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; color: var(--muted); }
+.swatch { width: 10px; height: 10px; border-radius: 2px; flex: 0 0 auto; }
+.timing-value { font: 500 1.35rem/1.2 var(--font-mono); font-variant-numeric: tabular-nums; }
+.verdict { margin: 14px 0 0; font-size: 0.85rem; }
+.verdict-ok { color: var(--ok); }
+.verdict-over { color: var(--budget); }
+
+/* Knowledge used */
+.passages { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; counter-reset: rank; }
+.passage { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.passage summary {
+  list-style: none; cursor: pointer; display: grid; grid-template-columns: auto 1fr auto; gap: 4px 12px; align-items: baseline;
+  padding: 12px 14px;
+}
+.passage summary::-webkit-details-marker { display: none; }
+.passage-rank { font: 500 0.8rem/1 var(--font-mono); color: var(--signal); grid-row: span 2; align-self: start; padding-top: 3px; }
+.passage-heading { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.passage-score { font: 400 0.75rem/1 var(--font-mono); color: var(--muted); white-space: nowrap; }
+.passage-section { grid-column: 2 / 4; font-size: 0.8rem; color: var(--muted); }
+.passage-text { margin: 0; padding: 0 14px 14px 14px; font-size: 0.88rem; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+.passage[open] summary { border-bottom: 1px dashed var(--line); margin-bottom: 10px; }
+.note { margin: 0; color: var(--muted); font-size: 0.9rem; }
+.note-warning { border-left: 3px solid var(--budget); padding: 8px 12px; background: var(--surface); border-radius: 0 6px 6px 0; color: var(--ink); }
+
+/* Session summary */
+.session-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.session-stat { border-top: 1px solid var(--line); padding-top: 10px; display: grid; gap: 2px; }
+.session-stat-value { font: 500 1.05rem/1.2 var(--font-mono); font-variant-numeric: tabular-nums; }
+.session-stat-label { font-size: 0.78rem; color: var(--muted); }
+
+.empty-state { display: grid; gap: 8px; align-content: start; }
+.empty-title { margin: 0; font: 600 1.15rem/1.3 var(--font-display); }
+
+/* Start screen: the click that opens the chat is what lets the browser play the spoken greeting */
+.start-screen {
+  position: fixed; inset: 0; z-index: 10;
+  display: grid; place-items: center; padding: 24px 16px;
+  background: var(--paper);
+}
+.start-card { display: grid; justify-items: center; gap: 14px; text-align: center; max-width: 420px; }
+.start-card .portrait { width: 72px; height: 72px; font-size: 1.2rem; }
+.start-card .portrait.has-portrait {
+  width: 160px; height: 200px; border-radius: 14px; font-size: 0; color: transparent;
+  background-size: cover; background-position: center top;
+}
+.start-title { margin: 0; font: 700 1.6rem/1.2 var(--font-display); letter-spacing: -0.02em; }
+.start-text { margin: 0; color: var(--muted); }
+.start-button {
+  border: 0; border-radius: 99px; padding: 14px 28px; cursor: pointer;
+  background: var(--signal); color: #fff; font-weight: 600; font-size: 1rem;
+}
+.start-button:disabled { opacity: 0.6; cursor: default; }
+.start-text-only { border: 0; background: none; color: var(--muted); text-decoration: underline; cursor: pointer; font-size: 0.9rem; }
+
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Narrow screens: stack the inspector under the conversation */
+@media (max-width: 860px) {
+  .app { height: auto; min-height: 100%; }
+  .workspace { grid-template-columns: minmax(0, 1fr); }
+  .conversation { border-right: 0; border-bottom: 1px solid var(--line); }
+  .transcript { min-height: 36vh; max-height: 52vh; }
+  .stage-media { height: clamp(200px, 34vh, 360px); }
+  .avatar-strip, .transcript, .composer-area, .inspector { padding-left: 16px; padding-right: 16px; }
+  .brand-note { display: none; }
+}
+@media (max-width: 560px) {
+  .topbar { padding-left: 16px; padding-right: 16px; }
+  .run-facts { width: 100%; }
+  .run-facts .button-quiet { margin-left: auto; }
+  .voiceprint { display: none; }
+}
+@media (max-width: 480px) {
+  .session-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .composer-hint { display: none; }
+  .talk-label { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+<div class="start-screen" id="start-screen">
+  <div class="start-card">
+    <div class="portrait start-portrait" id="start-portrait" aria-hidden="true">S4U</div>
+    <h2 class="start-title">Smart4U digital avatar</h2>
+    <p class="start-text" id="start-text">Start a voice conversation. Your browser will ask for the microphone.</p>
+    <button class="start-button" id="start-button" type="button" disabled>Start conversation</button>
+    <button class="start-text-only" id="start-text-only" type="button">Continue with text only</button>
+  </div>
+</div>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <h1 class="brand-name">ViraOne</h1>
+      <span class="brand-note">Test console for the Smart4U avatar</span>
+    </div>
+    <div class="run-facts">
+      <select class="fact language-select" id="model-select" autocomplete="off" aria-label="Language model" title="Language model. Groq is free; OpenAI models use paid credit. Switching starts a new conversation."></select>
+      <span class="fact" id="fact-speech" title="Speech-to-text model">speech …</span>
+      <select class="fact language-select" id="language-select" aria-label="Conversation language" title="Conversation language: each has its own knowledge base, prompt and speech models"></select>
+      <button class="button-quiet" id="new-conversation" type="button">New conversation</button>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <section class="conversation" aria-label="Conversation">
+      <div class="avatar-stage" id="avatar-stage" data-state="idle">
+        <div class="stage-media">
+          <div class="stage-still" id="stage-still" aria-hidden="true"><span class="stage-initials">S4U</span></div>
+          <video class="stage-video" id="avatar-video" autoplay playsinline muted hidden aria-label="Smart4U avatar"></video>
+          <p class="stage-note" id="stage-note" hidden></p>
+        </div>
+        <div class="avatar-strip" id="avatar-strip">
+          <div class="avatar-meta">
+            <p class="avatar-name">Smart4U digital avatar</p>
+            <p class="avatar-status" id="avatar-status" aria-live="polite">Loading…</p>
+          </div>
+          <div class="voiceprint" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+        </div>
+      </div>
+
+      <div class="transcript" id="transcript" aria-live="polite"></div>
+
+      <div class="composer-area">
+        <div class="suggestions" id="suggestions" aria-label="Example questions"></div>
+        <form class="composer" id="composer">
+          <button class="talk" id="talk-button" type="button" aria-pressed="false">
+            <span class="talk-dot" aria-hidden="true"></span><span class="talk-label" id="talk-label">Start talking</span>
+          </button>
+          <button class="mute" id="mute-button" type="button" aria-pressed="false" hidden>Mute mic</button>
+          <label class="visually-hidden" for="message-input">Your message</label>
+          <textarea id="message-input" rows="1" placeholder="Or type a question" autocomplete="off"></textarea>
+          <button class="send" id="send-button" type="submit" disabled>Send</button>
+        </form>
+        <p class="voice-notice" id="voice-notice" hidden></p>
+        <p class="composer-hint">Press Start talking to join a voice call, then just speak: the avatar answers when you finish. Talking over it interrupts it. A high bell means your turn, a low bell means it is answering. Headphones stop it hearing itself.</p>
+      </div>
+    </section>
+
+    <aside class="inspector" aria-label="Reply details">
+      <section id="reply-details" aria-live="polite"></section>
+
+      <section aria-labelledby="session-label">
+        <p class="panel-label" id="session-label">This conversation</p>
+        <div class="session-stats">
+          <div class="session-stat"><span class="session-stat-value mono" id="stat-replies">0</span><span class="session-stat-label">replies</span></div>
+          <div class="session-stat"><span class="session-stat-value mono" id="stat-average">–</span><span class="session-stat-label">average reply start</span></div>
+          <div class="session-stat"><span class="session-stat-value mono" id="stat-slowest">–</span><span class="session-stat-label">slowest reply start</span></div>
+        </div>
+      </section>
+    </aside>
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/livekit-client@2.22.4/dist/livekit-client.umd.js"></script>
+<script>
+const EXAMPLE_QUESTIONS = {
+  en: [
+    "What does Smart4U do?",
+    "How much does a website cost?",
+    "How much is hosting?",
+    "How much does SCARD cost?",
+    "Are you a Google partner?",
+    "Can I buy ViraOne now?",
+    "I run a beauty salon. Any examples?",
+    "I want to speak to the owner."
+  ],
+  pl: [
+    "Czym zajmuje się Smart4U?",
+    "Ile kosztuje strona?",
+    "Ile kosztuje hosting?",
+    "Ile kosztuje SCARD?",
+    "Czy jesteście partnerem Google?",
+    "Czy mogę już kupić ViraOne?",
+    "Prowadzę salon beauty. Macie przykłady?",
+    "Chcę porozmawiać z właścicielem."
+  ]
+};
+const MIN_RULER_SCALE_SECONDS = 2;
+
+const state = {
+  sessionId: crypto.randomUUID(),
+  languageCode: "en",
+  modelKey: "",
+  settings: {
+    languages: [{ code: "en", name: "English", greeting: "Hi! How can I help you?", speech_recognition_model: "unknown" }],
+    target_reply_start_seconds: 1.2, speech_output_enabled: false, voice_enabled: false, reply_details_topic: ""
+  },
+  replies: [],
+  selectedReplyIndex: -1,
+  isBusy: false,
+  activeTurn: null
+};
+
+const transcript = document.getElementById("transcript");
+const messageInput = document.getElementById("message-input");
+const sendButton = document.getElementById("send-button");
+const talkButton = document.getElementById("talk-button");
+const talkLabel = document.getElementById("talk-label");
+const avatarStrip = document.getElementById("avatar-strip");
+const muteButton = document.getElementById("mute-button");
+const avatarStatus = document.getElementById("avatar-status");
+const replyDetails = document.getElementById("reply-details");
+
+function formatSeconds(seconds) {
+  if (seconds === null || seconds === undefined) {
+    return "–";
+  }
+  if (seconds < 1) {
+    return Math.round(seconds * 1000) + " ms";
+  }
+  return seconds.toFixed(2) + " s";
+}
+
+function hasValue(value) {
+  return value !== null && value !== undefined;
+}
+
+function createElement(tagName, className, text) {
+  const element = document.createElement(tagName);
+  if (className) {
+    element.className = className;
+  }
+  if (text !== undefined) {
+    element.textContent = text;
+  }
+  return element;
+}
+
+/* The video area: the live avatar when the call has one, otherwise the still portrait (or the initials). */
+class AvatarStageView {
+  constructor() {
+    this.stage = document.getElementById("avatar-stage");
+    this.still = document.getElementById("stage-still");
+    this.video = document.getElementById("avatar-video");
+    this.note = document.getElementById("stage-note");
+    this.videoTrack = null;
+    this.video.addEventListener("playing", this.handleVideoPlaying.bind(this));
+  }
+
+  showPortrait(portraitUrl) {
+    if (portraitUrl) {
+      this.still.style.backgroundImage = "url('" + portraitUrl + "')";
+      this.still.classList.add("has-portrait");
+    }
+  }
+
+  setAgentState(agentState) {
+    this.stage.dataset.state = agentState;
+  }
+
+  /* "on": video is coming; "unavailable": the avatar is busy or down, so the call is voice only; "off": no avatar. */
+  showAvatarAvailability(avatarState) {
+    if (avatarState === "on" && !this.videoTrack) {
+      this.showNote("The avatar is getting ready…");
+    } else if (avatarState === "unavailable") {
+      this.showNote("The avatar is unavailable right now, so this call is voice only.");
+    } else if (avatarState === "off") {
+      this.note.hidden = true;
+    }
+  }
+
+  showNote(text) {
+    this.note.textContent = text;
+    this.note.hidden = false;
+  }
+
+  attachVideo(track) {
+    this.videoTrack = track;
+    track.attach(this.video);
+  }
+
+  handleVideoPlaying() {
+    this.video.hidden = false;
+    this.still.hidden = true;
+    this.note.hidden = true;
+  }
+
+  detachVideo() {
+    if (this.videoTrack) {
+      this.videoTrack.detach(this.video);
+      this.videoTrack = null;
+    }
+    this.video.hidden = true;
+    this.still.hidden = false;
+  }
+
+  reset() {
+    this.detachVideo();
+    this.note.hidden = true;
+    this.stage.dataset.state = "idle";
+  }
+}
+
+const avatarStage = new AvatarStageView();
+
+/* Voice goes through LiveKit: the voice agent listens, decides when the customer has finished, answers from the same
+   knowledge base and speaks with ElevenLabs. This class joins the call and turns what LiveKit sends into transcript
+   bubbles; after each spoken reply the agent sends the knowledge used and the timings for the inspector. */
+class VoiceCall {
+  constructor() {
+    this.room = null;
+    this.userLinesBySegment = new Map();
+    this.repliesAwaitingDetails = [];
+    this.agentState = "";
+    this.greetingPending = false;
+  }
+
+  isActive() {
+    return this.room !== null;
+  }
+
+  /* A fresh conversation opens with the greeting spoken aloud; its text is already on screen, so its
+     transcription is not shown again. Mid-conversation calls skip the greeting. */
+  async start() {
+    this.greetingPending = state.replies.length === 0;
+    const query = "session_id=" + encodeURIComponent(state.sessionId) + "&language=" + encodeURIComponent(state.languageCode) + "&model=" + encodeURIComponent(state.modelKey) + "&speak_greeting=" + this.greetingPending;
+    const response = await fetch("/api/voice-token?" + query);
+    const connection = await response.json();
+    if (!response.ok) {
+      throw new Error(connection.error || "The server answered with status " + response.status + ".");
+    }
+    const room = new LivekitClient.Room();
+    this.room = room;
+    room.on(LivekitClient.RoomEvent.TrackSubscribed, this.handleTrackSubscribed.bind(this));
+    room.on(LivekitClient.RoomEvent.TrackUnsubscribed, this.handleTrackUnsubscribed.bind(this));
+    room.on(LivekitClient.RoomEvent.ParticipantAttributesChanged, this.handleAttributesChanged.bind(this));
+    room.on(LivekitClient.RoomEvent.ParticipantConnected, this.handleParticipantConnected.bind(this));
+    room.on(LivekitClient.RoomEvent.Disconnected, this.handleDisconnected.bind(this));
+    room.registerTextStreamHandler("lk.transcription", this.handleTranscription.bind(this));
+    room.registerTextStreamHandler(state.settings.reply_details_topic, this.handleReplyDetails.bind(this));
+    setAvatarState("call-starting");
+    await room.connect(connection.url, connection.token);
+    await room.localParticipant.setMicrophoneEnabled(true, { echoCancellation: true, noiseSuppression: true, autoGainControl: true });
+    setMuteButton(true, false);
+    for (const participant of room.remoteParticipants.values()) {
+      this.showAgentState(participant.attributes["lk.agent.state"]);
+      this.showAvatarState(participant.attributes[state.settings.avatar_state_attribute]);
+    }
+  }
+
+  async setMicrophoneMuted(isMuted) {
+    await this.room.localParticipant.setMicrophoneEnabled(!isMuted);
+  }
+
+  async stop() {
+    if (this.room) {
+      const room = this.room;
+      this.room = null;
+      await room.disconnect();
+    }
+    this.finishCall();
+  }
+
+  async sendTypedMessage(text) {
+    await this.room.localParticipant.sendText(text, { topic: "lk.chat" });
+  }
+
+  /* With the avatar, its audio track carries the voice and its video track the face; they are sent as a synced pair. */
+  handleTrackSubscribed(track) {
+    if (track.kind === LivekitClient.Track.Kind.Audio) {
+      const element = track.attach();
+      element.hidden = true;
+      document.body.appendChild(element);
+    } else if (track.kind === LivekitClient.Track.Kind.Video) {
+      avatarStage.attachVideo(track);
+    }
+  }
+
+  handleTrackUnsubscribed(track) {
+    if (track.kind === LivekitClient.Track.Kind.Video) {
+      avatarStage.detachVideo();
+    }
+  }
+
+  /* Changes only report a new value, so the agent's state at the moment it joins is read here. */
+  handleParticipantConnected(participant) {
+    this.showAgentState(participant.attributes["lk.agent.state"]);
+    this.showAvatarState(participant.attributes[state.settings.avatar_state_attribute]);
+  }
+
+  handleAttributesChanged(changedAttributes, participant) {
+    if (!this.room || participant === this.room.localParticipant) {
+      return;
+    }
+    this.showAgentState(changedAttributes["lk.agent.state"]);
+    this.showAvatarState(changedAttributes[state.settings.avatar_state_attribute]);
+  }
+
+  showAvatarState(avatarState) {
+    if (avatarState && this.room) {
+      avatarStage.showAvatarAvailability(avatarState);
+    }
+  }
+
+  showAgentState(agentState) {
+    if (!agentState || !this.room) {
+      return;
+    }
+    this.agentState = agentState;
+    avatarStage.setAgentState(agentState);
+    if (agentState === "initializing") {
+      setAvatarState("call-starting");
+    } else if (agentState === "thinking") {
+      setAvatarState("searching");
+    } else if (agentState === "speaking") {
+      setAvatarState("speaking");
+    } else {
+      setAvatarState("ready");
+    }
+  }
+
+  handleTranscription(reader, participantInfo) {
+    if (participantInfo.identity === this.room.localParticipant.identity) {
+      this.readUserSpeech(reader);
+    } else {
+      this.readAgentReply(reader);
+    }
+  }
+
+  /* Scribe sends the customer's words while they speak; each update replaces the line, the final one is marked. */
+  async readUserSpeech(reader) {
+    const segmentId = reader.info.attributes["lk.segment_id"] || reader.info.id;
+    let line = this.userLinesBySegment.get(segmentId);
+    if (!line) {
+      line = addUserMessage("", "speaking…");
+      this.userLinesBySegment.set(segmentId, line);
+      setSuggestionsVisible(false);
+    }
+    let text = "";
+    for await (const chunk of reader) {
+      text += chunk;
+      line.bubble.textContent = text;
+      scrollTranscriptToEnd();
+    }
+    if (reader.info.attributes["lk.transcription_final"] === "true") {
+      line.meta.textContent = "spoken";
+    }
+  }
+
+  /* The reply arrives word by word in step with the voice; if the customer interrupts, it stops where they cut in. */
+  async readAgentReply(reader) {
+    if (this.greetingPending) {
+      this.greetingPending = false;
+      await reader.readAll();
+      return;
+    }
+    const replyIndex = state.replies.length;
+    const reply = newReply("");
+    reply.view = addAvatarReplyShell(replyIndex);
+    state.replies.push(reply);
+    this.repliesAwaitingDetails.push(reply);
+    for await (const chunk of reader) {
+      reply.text += chunk;
+      reply.view.bubble.textContent = reply.text;
+      scrollTranscriptToEnd();
+    }
+    reply.view.bubble.classList.remove("is-streaming");
+  }
+
+  async handleReplyDetails(reader) {
+    const details = JSON.parse(await reader.readAll());
+    const reply = this.repliesAwaitingDetails.shift();
+    if (!reply) {
+      return;
+    }
+    reply.question = details.question;
+    reply.passages = details.passages;
+    reply.endSilenceSeconds = details.end_of_turn_wait_seconds;
+    reply.retrievalSeconds = details.retrieval_seconds;
+    reply.firstTokenSeconds = details.first_token_seconds;
+    reply.firstAudioSeconds = details.first_audio_seconds;
+    reply.firstFaceSeconds = details.first_face_seconds;
+    reply.totalSeconds = details.total_seconds;
+    updateReplyCaption(reply);
+    if (details.interrupted) {
+      reply.view.caption.append(createElement("span", "", "interrupted"));
+    }
+    selectReply(state.replies.indexOf(reply));
+    renderSessionStats();
+  }
+
+  handleDisconnected() {
+    this.room = null;
+    this.finishCall();
+  }
+
+  finishCall() {
+    for (const element of document.querySelectorAll("audio")) {
+      element.remove();
+    }
+    this.userLinesBySegment.clear();
+    this.repliesAwaitingDetails = [];
+    this.agentState = "";
+    this.greetingPending = false;
+    avatarStage.reset();
+    setMuteButton(false, false);
+    setTalkButton(false);
+    setAvatarState("ready");
+  }
+}
+
+const voiceCall = new VoiceCall();
+
+function readyStatusText() {
+  if (voiceCall.isActive()) {
+    return "In a call. Just speak; talk over the avatar to interrupt it.";
+  }
+  if (!state.settings.voice_enabled) {
+    return "Ready. Type a question. Voice calls are off.";
+  }
+  if (state.settings.speech_output_enabled) {
+    return "Ready. Press Start talking, or type a question.";
+  }
+  return "Ready. Press Start talking, or type a question. Replies are text only.";
+}
+
+function setAvatarState(mode) {
+  avatarStrip.classList.remove("is-searching", "is-answering", "is-speaking", "is-listening");
+  if (mode === "call-starting") {
+    avatarStrip.classList.add("is-listening");
+    avatarStatus.textContent = "Joining the call…";
+  } else if (mode === "searching") {
+    avatarStrip.classList.add("is-searching");
+    avatarStatus.textContent = "Searching the knowledge base…";
+  } else if (mode === "answering") {
+    avatarStrip.classList.add("is-answering");
+    avatarStatus.textContent = "Answering…";
+  } else if (mode === "speaking") {
+    avatarStrip.classList.add("is-speaking");
+    avatarStatus.textContent = "Speaking…";
+  } else {
+    avatarStatus.textContent = readyStatusText();
+  }
+}
+
+function scrollTranscriptToEnd() {
+  transcript.scrollTop = transcript.scrollHeight;
+}
+
+/* Returns the bubble and its meta line, so a spoken line can be updated while the customer is still talking. */
+function addUserMessage(text, metaText) {
+  const message = createElement("div", "message message-user");
+  const bubble = createElement("div", "bubble", text);
+  const meta = createElement("div", "message-meta mono", metaText);
+  message.append(bubble, meta);
+  transcript.appendChild(message);
+  scrollTranscriptToEnd();
+  return { bubble: bubble, meta: meta };
+}
+
+function addGreeting() {
+  const message = createElement("div", "message message-avatar");
+  message.appendChild(createElement("div", "bubble", currentLanguage().greeting));
+  transcript.appendChild(message);
+}
+
+function addErrorMessage(text) {
+  const message = createElement("div", "message message-avatar message-error");
+  const bubble = createElement("div", "bubble", text);
+  bubble.setAttribute("role", "alert");
+  message.appendChild(bubble);
+  transcript.appendChild(message);
+  scrollTranscriptToEnd();
+}
+
+function addAvatarReplyShell(replyIndex) {
+  const message = createElement("div", "message message-avatar");
+  const bubble = createElement("button", "bubble is-streaming");
+  bubble.type = "button";
+  bubble.setAttribute("aria-pressed", "false");
+  bubble.setAttribute("aria-label", "Avatar reply. Select to inspect.");
+  bubble.addEventListener("click", function () {
+    selectReply(replyIndex);
+  });
+  const caption = createElement("div", "message-caption");
+  message.append(bubble, caption);
+  transcript.appendChild(message);
+  scrollTranscriptToEnd();
+  return { bubble: bubble, caption: caption };
+}
+
+/* The reply starts when the customer sees the face speak; without the avatar, when they hear it (first audio);
+   without voice, when the first word appears. */
+function replyStartSeconds(reply) {
+  if (hasValue(reply.firstFaceSeconds)) {
+    return reply.endSilenceSeconds + reply.firstFaceSeconds;
+  }
+  if (hasValue(reply.firstAudioSeconds)) {
+    return reply.endSilenceSeconds + reply.firstAudioSeconds;
+  }
+  if (hasValue(reply.firstTokenSeconds)) {
+    return reply.endSilenceSeconds + reply.firstTokenSeconds;
+  }
+  return null;
+}
+
+/* Each step as [start, end] in seconds from the moment the customer stopped talking. Voice turns start with the
+   end-of-turn wait: the agent waits for silence (and the turn detector) before it starts on the reply. */
+function replySteps(reply) {
+  const steps = [];
+  const offset = reply.endSilenceSeconds;
+  let cursor = 0;
+  if (offset > 0) {
+    steps.push({ name: "wait", label: "End-of-turn wait", start: 0, end: offset });
+    cursor = offset;
+  }
+  if (hasValue(reply.retrievalSeconds)) {
+    steps.push({ name: "search", label: "Knowledge search", start: cursor, end: cursor + reply.retrievalSeconds });
+    cursor = cursor + reply.retrievalSeconds;
+  }
+  if (hasValue(reply.firstTokenSeconds)) {
+    steps.push({ name: "model", label: "Language model", start: cursor, end: offset + reply.firstTokenSeconds });
+    cursor = offset + reply.firstTokenSeconds;
+  }
+  if (hasValue(reply.firstAudioSeconds)) {
+    steps.push({ name: "voice", label: "ElevenLabs voice", start: cursor, end: offset + reply.firstAudioSeconds });
+    cursor = offset + reply.firstAudioSeconds;
+  }
+  if (hasValue(reply.firstFaceSeconds)) {
+    steps.push({ name: "face", label: "Avatar face", start: cursor, end: offset + reply.firstFaceSeconds });
+  }
+  return steps;
+}
+
+function rulerScaleSeconds(reply) {
+  const slowest = Math.max(reply.endSilenceSeconds + Math.max(reply.totalSeconds || 0, reply.firstFaceSeconds || 0),
+                           state.settings.target_reply_start_seconds || 0);
+  return Math.max(MIN_RULER_SCALE_SECONDS, Math.ceil(slowest));
+}
+
+function buildRulerSegments(container, reply, scale) {
+  for (const step of replySteps(reply)) {
+    const segment = createElement("div", "ruler-segment segment-" + step.name);
+    const start = Math.min(step.start / scale, 1);
+    const end = Math.min(Math.max(step.end, step.start) / scale, 1);
+    segment.style.left = start * 100 + "%";
+    segment.style.width = (end - start) * 100 + "%";
+    container.appendChild(segment);
+  }
+}
+
+function updateReplyCaption(reply) {
+  reply.view.caption.textContent = "";
+  const miniRuler = createElement("div", "mini-ruler");
+  miniRuler.setAttribute("aria-hidden", "true");
+  buildRulerSegments(miniRuler, reply, rulerScaleSeconds(reply));
+  let startLabel = "first word ";
+  if (hasValue(reply.firstFaceSeconds)) {
+    startLabel = "first face ";
+  } else if (hasValue(reply.firstAudioSeconds)) {
+    startLabel = "first audio ";
+  }
+  const start = createElement("span", "mono", startLabel + formatSeconds(replyStartSeconds(reply)));
+  const sources = createElement("span", "", reply.passages.length + " knowledge parts");
+  reply.view.caption.append(miniRuler, start, sources);
+}
+
+function selectReply(replyIndex) {
+  state.selectedReplyIndex = replyIndex;
+  for (let index = 0; index < state.replies.length; index += 1) {
+    state.replies[index].view.bubble.setAttribute("aria-pressed", String(index === replyIndex));
+  }
+  renderReplyDetails();
+}
+
+function renderEmptyDetails() {
+  replyDetails.textContent = "";
+  const empty = createElement("div", "empty-state");
+  empty.append(
+    createElement("p", "panel-label", "Reply details"),
+    createElement("p", "empty-title", "Ask a question to see how the avatar answered"),
+    createElement("p", "note", "For each reply you'll see how long each step took, from your speech to the avatar's voice, and which parts of the knowledge base it used.")
+  );
+  replyDetails.appendChild(empty);
+}
+
+function renderReplyDetails() {
+  const reply = state.replies[state.selectedReplyIndex];
+  if (!reply) {
+    return;
+  }
+  replyDetails.textContent = "";
+  replyDetails.appendChild(createElement("p", "panel-label", "Reply details"));
+  replyDetails.appendChild(createElement("p", "selected-question", reply.question));
+  replyDetails.appendChild(createElement("p", "reply-model mono", "model " + reply.modelLabel));
+
+  const target = state.settings.target_reply_start_seconds;
+  const scaleSeconds = rulerScaleSeconds(reply);
+  const steps = replySteps(reply);
+  const ruler = createElement("div", "ruler");
+  const targetLabel = createElement("span", "ruler-target-label", "target " + formatSeconds(target));
+  targetLabel.style.left = (target / scaleSeconds) * 100 + "%";
+  const track = createElement("div", "ruler-track");
+  track.setAttribute("role", "img");
+  const descriptionParts = [];
+  for (const step of steps) {
+    descriptionParts.push(step.label + " done at " + formatSeconds(step.end));
+  }
+  track.setAttribute("aria-label", descriptionParts.join(", "));
+  buildRulerSegments(track, reply, scaleSeconds);
+  const targetMark = createElement("div", "ruler-target");
+  targetMark.style.left = (target / scaleSeconds) * 100 + "%";
+  track.appendChild(targetMark);
+  const scale = createElement("div", "ruler-scale mono");
+  scale.append(createElement("span", "", "0 s"), createElement("span", "", (scaleSeconds / 2) + " s"), createElement("span", "", scaleSeconds + " s"));
+  ruler.append(targetLabel, track, scale);
+  replyDetails.appendChild(ruler);
+
+  const timings = createElement("div", "timings");
+  for (const step of steps) {
+    timings.appendChild(buildTiming(step.label, step.end - step.start, step.name));
+  }
+  replyDetails.appendChild(timings);
+
+  const startSeconds = replyStartSeconds(reply);
+  if (hasValue(startSeconds)) {
+    let measured = "Voice";
+    if (hasValue(reply.firstFaceSeconds)) {
+      measured = "The face";
+    } else if (!hasValue(reply.firstAudioSeconds)) {
+      measured = "First word";
+    }
+    if (startSeconds <= target) {
+      replyDetails.appendChild(createElement("p", "verdict verdict-ok", measured + " started at " + formatSeconds(startSeconds) + ", within the " + formatSeconds(target) + " target."));
+    } else {
+      replyDetails.appendChild(createElement("p", "verdict verdict-over", measured + " started at " + formatSeconds(startSeconds) + ", " + formatSeconds(startSeconds - target) + " over the " + formatSeconds(target) + " target."));
+    }
+  }
+
+  const knowledgeSection = createElement("div", "");
+  knowledgeSection.style.marginTop = "28px";
+  knowledgeSection.appendChild(createElement("p", "panel-label", "Knowledge used, best match first"));
+  if (reply.passages.length === 0) {
+    knowledgeSection.appendChild(createElement("p", "note note-warning", "No part of the knowledge base matched this question, so the avatar was told to point the customer to the team."));
+  } else {
+    const list = createElement("ol", "passages");
+    for (let index = 0; index < reply.passages.length; index += 1) {
+      list.appendChild(buildPassage(reply.passages[index], index));
+    }
+    knowledgeSection.appendChild(list);
+  }
+  replyDetails.appendChild(knowledgeSection);
+}
+
+function buildTiming(label, seconds, stepName) {
+  const timing = createElement("div", "timing");
+  const labelRow = createElement("span", "timing-label");
+  const swatch = createElement("span", "swatch segment-" + stepName);
+  labelRow.append(swatch, document.createTextNode(label));
+  timing.append(labelRow, createElement("span", "timing-value", formatSeconds(seconds)));
+  return timing;
+}
+
+function buildPassage(passage, index) {
+  const item = createElement("li", "");
+  const details = createElement("details", "passage");
+  if (index === 0) {
+    details.open = true;
+  }
+  const summary = createElement("summary", "");
+  summary.append(
+    createElement("span", "passage-rank", String(index + 1)),
+    createElement("span", "passage-heading", passage.heading),
+    createElement("span", "passage-score", "match " + passage.fusion_score.toFixed(2)),
+    createElement("span", "passage-section", passage.section)
+  );
+  details.append(summary, createElement("p", "passage-text", passage.text));
+  item.appendChild(details);
+  return item;
+}
+
+function renderSessionStats() {
+  const startTimes = [];
+  for (const reply of state.replies) {
+    const startSeconds = replyStartSeconds(reply);
+    if (hasValue(startSeconds)) {
+      startTimes.push(startSeconds);
+    }
+  }
+  document.getElementById("stat-replies").textContent = String(startTimes.length);
+  if (startTimes.length === 0) {
+    document.getElementById("stat-average").textContent = "–";
+    document.getElementById("stat-slowest").textContent = "–";
+    return;
+  }
+  let total = 0;
+  let slowest = 0;
+  for (const seconds of startTimes) {
+    total += seconds;
+    slowest = Math.max(slowest, seconds);
+  }
+  document.getElementById("stat-average").textContent = formatSeconds(total / startTimes.length);
+  document.getElementById("stat-slowest").textContent = formatSeconds(slowest);
+}
+
+function setBusy(isBusy) {
+  state.isBusy = isBusy;
+  sendButton.disabled = isBusy || messageInput.value.trim() === "";
+  for (const chip of document.querySelectorAll(".suggestion")) {
+    chip.disabled = isBusy;
+  }
+}
+
+function newReply(question) {
+  return {
+    question: question, modelLabel: currentModelLabel(), text: "", passages: [], endSilenceSeconds: 0,
+    retrievalSeconds: null, firstTokenSeconds: null, firstAudioSeconds: null, firstFaceSeconds: null, totalSeconds: null,
+    view: null
+  };
+}
+
+/* Reads the server's newline-delimited JSON events for one typed turn and updates the page as each one arrives. */
+class TurnStream {
+  constructor(reply, replyIndex) {
+    this.reply = reply;
+    this.replyIndex = replyIndex;
+    this.replyStarted = false;
+  }
+
+  async read(response) {
+    if (!response.ok || !response.body) {
+      throw new Error("The server answered with status " + response.status + ". Check the terminal running 'python main.py web'.");
+    }
+    const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+    let buffered = "";
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) {
+        break;
+      }
+      buffered += chunk.value;
+      let newlineIndex = buffered.indexOf("\n");
+      while (newlineIndex !== -1) {
+        const line = buffered.slice(0, newlineIndex).trim();
+        buffered = buffered.slice(newlineIndex + 1);
+        if (line) {
+          this.handleEvent(JSON.parse(line));
+        }
+        newlineIndex = buffered.indexOf("\n");
+      }
+    }
+    if (!this.replyStarted) {
+      throw new Error("The model returned an empty reply. Try asking again.");
+    }
+  }
+
+  handleEvent(event) {
+    const reply = this.reply;
+    if (event.type === "passages") {
+      reply.passages = event.passages;
+      setAvatarState("answering");
+    } else if (event.type === "text") {
+      if (!this.replyStarted) {
+        this.replyStarted = true;
+        reply.view = addAvatarReplyShell(this.replyIndex);
+        state.replies.push(reply);
+      }
+      reply.text += event.text;
+      reply.view.bubble.textContent = reply.text;
+      scrollTranscriptToEnd();
+    } else if (event.type === "done") {
+      reply.retrievalSeconds = event.retrieval_seconds;
+      reply.firstTokenSeconds = event.first_token_seconds;
+      reply.totalSeconds = event.total_seconds;
+    } else if (event.type === "error") {
+      throw new Error(event.message);
+    }
+  }
+}
+
+/* One typed turn at a time; "New conversation" aborts the turn in progress. */
+async function runTurn(request, reply) {
+  const turn = { abortController: new AbortController() };
+  state.activeTurn = turn;
+  setBusy(true);
+  setSuggestionsVisible(false);
+  const replyIndex = state.replies.length;
+  const turnStream = new TurnStream(reply, replyIndex);
+  request.options.signal = turn.abortController.signal;
+  try {
+    const response = await fetch(request.url, request.options);
+    await turnStream.read(response);
+    reply.view.bubble.classList.remove("is-streaming");
+    updateReplyCaption(reply);
+    selectReply(replyIndex);
+    renderSessionStats();
+  } catch (error) {
+    if (turnStream.replyStarted) {
+      reply.view.bubble.classList.remove("is-streaming");
+    }
+    if (error.name === "AbortError") {
+      if (turnStream.replyStarted) {
+        reply.view.caption.textContent = "interrupted";
+      }
+    } else if (error instanceof TypeError) {
+      addErrorMessage("Can't reach the test console server. Start it with 'python main.py web'.");
+    } else {
+      addErrorMessage(error.message);
+    }
+  } finally {
+    if (state.activeTurn === turn) {
+      state.activeTurn = null;
+      setBusy(false);
+      setAvatarState("ready");
+    }
+  }
+}
+
+/* During a call a typed message goes to the voice agent, which answers it in the call (spoken); otherwise the
+   console server answers it as text. */
+function sendTypedMessage(text) {
+  const question = text.trim();
+  if (!question || state.isBusy) {
+    return;
+  }
+  messageInput.value = "";
+  resizeInput();
+  setSuggestionsVisible(false);
+  if (voiceCall.isActive()) {
+    addUserMessage(question, "typed in the call");
+    voiceCall.sendTypedMessage(question).catch(function (sendError) {
+      addErrorMessage("Couldn't send that to the call: " + sendError.message);
+    });
+    return;
+  }
+  addUserMessage(question, "");
+  setAvatarState("searching");
+  runTurn({
+    url: "/api/chat",
+    options: { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: state.sessionId, language: state.languageCode, model: state.modelKey, message: question }) }
+  }, newReply(question));
+}
+
+function setTalkButton(isInCall) {
+  talkButton.setAttribute("aria-pressed", String(isInCall));
+  if (isInCall) {
+    talkLabel.textContent = "End call";
+    talkButton.setAttribute("aria-label", "End call");
+  } else {
+    talkLabel.textContent = "Start talking";
+    talkButton.setAttribute("aria-label", "Start talking");
+  }
+}
+
+function setMuteButton(isVisible, isMuted) {
+  muteButton.hidden = !isVisible;
+  muteButton.setAttribute("aria-pressed", String(isMuted));
+  if (isMuted) {
+    muteButton.textContent = "Unmute mic";
+  } else {
+    muteButton.textContent = "Mute mic";
+  }
+}
+
+async function toggleMute() {
+  if (!voiceCall.isActive()) {
+    return;
+  }
+  const isMuted = muteButton.getAttribute("aria-pressed") !== "true";
+  await voiceCall.setMicrophoneMuted(isMuted);
+  setMuteButton(true, isMuted);
+}
+
+async function toggleCall() {
+  talkButton.disabled = true;
+  try {
+    if (voiceCall.isActive()) {
+      await voiceCall.stop();
+    } else {
+      avatarStatus.textContent = "Joining the call…";
+      await voiceCall.start();
+      setTalkButton(true);
+    }
+  } catch (callError) {
+    await voiceCall.stop();
+    addErrorMessage("The voice call couldn't start: " + callError.message + " Allow microphone access for this page, check the terminal running 'python main.py web', or type your question.");
+  } finally {
+    talkButton.disabled = false;
+  }
+}
+
+function closeStartScreen() {
+  document.getElementById("start-screen").hidden = true;
+  messageInput.focus();
+}
+
+/* A new conversation's call opens with the greeting spoken, so starting here makes the avatar greet out loud. */
+async function startConversation() {
+  closeStartScreen();
+  if (!talkButton.disabled) {
+    await toggleCall();
+  }
+}
+
+function resizeInput() {
+  messageInput.style.height = "auto";
+  messageInput.style.height = Math.min(messageInput.scrollHeight, 160) + "px";
+  if (messageInput.scrollHeight > 160) {
+    messageInput.style.overflowY = "auto";
+  } else {
+    messageInput.style.overflowY = "hidden";
+  }
+}
+
+function setSuggestionsVisible(isVisible) {
+  document.getElementById("suggestions").hidden = !isVisible;
+}
+
+function renderSuggestions() {
+  const container = document.getElementById("suggestions");
+  container.textContent = "";
+  for (const question of EXAMPLE_QUESTIONS[state.languageCode] || []) {
+    const chip = createElement("button", "suggestion", question);
+    chip.type = "button";
+    chip.addEventListener("click", function () {
+      sendTypedMessage(question);
+    });
+    container.appendChild(chip);
+  }
+}
+
+async function startNewConversation() {
+  if (state.activeTurn) {
+    state.activeTurn.abortController.abort();
+  }
+  if (voiceCall.isActive()) {
+    await voiceCall.stop();
+  }
+  const previousSessionId = state.sessionId;
+  state.sessionId = crypto.randomUUID();
+  state.replies = [];
+  state.selectedReplyIndex = -1;
+  transcript.textContent = "";
+  setSuggestionsVisible(true);
+  addGreeting();
+  renderEmptyDetails();
+  renderSessionStats();
+  setAvatarState("ready");
+  try {
+    await fetch("/api/reset", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: previousSessionId }) });
+  } catch (error) {
+    // The old conversation is dropped from the server on its own once newer ones replace it.
+  }
+}
+
+function currentLanguage() {
+  for (const language of state.settings.languages) {
+    if (language.code === state.languageCode) {
+      return language;
+    }
+  }
+  return state.settings.languages[0];
+}
+
+// Each language runs its own knowledge base, prompt and speech models on the server, so switching starts a new conversation.
+function applyLanguage() {
+  document.getElementById("fact-speech").textContent = "stt " + currentLanguage().speech_recognition_model;
+  transcript.lang = state.languageCode;
+  messageInput.lang = state.languageCode;
+  renderSuggestions();
+}
+
+function currentModelLabel() {
+  for (const model of state.settings.models || []) {
+    if (model.key === state.modelKey) {
+      return model.label;
+    }
+  }
+  return "default";
+}
+
+// Each conversation runs on one model, so switching starts a new conversation and replies from two models never mix.
+function switchModel(modelKey) {
+  state.modelKey = modelKey;
+  startNewConversation();
+}
+
+function switchLanguage(languageCode) {
+  state.languageCode = languageCode;
+  applyLanguage();
+  startNewConversation();
+}
+
+// The page always starts on the default (free) model, never on a paid one left selected in an earlier visit.
+function renderModelSelect() {
+  const modelSelect = document.getElementById("model-select");
+  modelSelect.textContent = "";
+  state.modelKey = state.settings.default_model_key || "";
+  for (const model of state.settings.models || []) {
+    let label = model.label;
+    if (!model.available) {
+      label += " (no API key)";
+    }
+    const option = createElement("option", "", label);
+    option.value = model.key;
+    option.disabled = !model.available;
+    modelSelect.appendChild(option);
+  }
+  modelSelect.value = state.modelKey;
+}
+
+async function loadSettings() {
+  try {
+    const response = await fetch("/api/settings");
+    if (response.ok) {
+      state.settings = await response.json();
+    }
+  } catch (error) {
+    addErrorMessage("Can't reach the test console server. Start it with 'python main.py web'.");
+  }
+  renderModelSelect();
+  if (state.settings.default_language_code) {
+    state.languageCode = state.settings.default_language_code;
+  }
+  const languageSelect = document.getElementById("language-select");
+  languageSelect.textContent = "";
+  for (const language of state.settings.languages) {
+    const option = createElement("option", "", language.name);
+    option.value = language.code;
+    languageSelect.appendChild(option);
+  }
+  languageSelect.value = state.languageCode;
+  applyLanguage();
+  const voiceNotice = document.getElementById("voice-notice");
+  if (!state.settings.voice_enabled) {
+    voiceNotice.textContent = state.settings.voice_disabled_reason;
+    voiceNotice.hidden = false;
+    talkButton.disabled = true;
+  } else if (!state.settings.speech_output_enabled && state.settings.speech_disabled_reason) {
+    voiceNotice.textContent = state.settings.speech_disabled_reason + " In a call, replies are text only.";
+    voiceNotice.hidden = false;
+  }
+  if (!window.LivekitClient || !navigator.mediaDevices) {
+    talkButton.disabled = true;
+    talkButton.title = "The voice call library didn't load. Check the internet connection and reload.";
+  }
+}
+
+messageInput.addEventListener("input", function () {
+  resizeInput();
+  sendButton.disabled = state.isBusy || messageInput.value.trim() === "";
+});
+messageInput.addEventListener("keydown", function (event) {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    sendTypedMessage(messageInput.value);
+  }
+});
+document.getElementById("composer").addEventListener("submit", function (event) {
+  event.preventDefault();
+  sendTypedMessage(messageInput.value);
+});
+talkButton.addEventListener("click", toggleCall);
+muteButton.addEventListener("click", toggleMute);
+document.getElementById("start-button").addEventListener("click", startConversation);
+document.getElementById("start-text-only").addEventListener("click", closeStartScreen);
+document.getElementById("new-conversation").addEventListener("click", startNewConversation);
+document.getElementById("language-select").addEventListener("change", function (event) {
+  switchLanguage(event.target.value);
+});
+document.getElementById("model-select").addEventListener("change", function (event) {
+  switchModel(event.target.value);
+});
+
+renderEmptyDetails();
+loadSettings().then(function () {
+  avatarStage.showPortrait(state.settings.avatar_portrait_url);
+  if (state.settings.avatar_portrait_url) {
+    const startPortrait = document.getElementById("start-portrait");
+    startPortrait.style.backgroundImage = "url('" + state.settings.avatar_portrait_url + "')";
+    startPortrait.classList.add("has-portrait");
+  }
+  addGreeting();
+  setAvatarState("ready");
+  const startButton = document.getElementById("start-button");
+  if (talkButton.disabled) {
+    document.getElementById("start-text").textContent = "Voice is unavailable right now, so this conversation is text only.";
+    startButton.textContent = "Start text conversation";
+    document.getElementById("start-text-only").hidden = true;
+  }
+  startButton.disabled = false;
+});
+</script>
+</body>
+</html>

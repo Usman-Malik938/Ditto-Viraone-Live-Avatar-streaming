@@ -181,8 +181,10 @@ class AvatarSDK(StreamSDK):
 class StreamSession:
     """One continuous avatar stream. Thread-based; feed speech with push_speech(), receive frames via on_frame.
 
-    on_frame(frame_idx, jpeg_bytes, pcm16_bytes): called from a worker thread for every 40 ms frame, with the
-    640 audio samples that belong to it, so the client can play picture and sound in sync.
+    on_frame(frame_idx, answer, jpeg_bytes, pcm16_bytes): called from a worker thread for every 40 ms frame, with the
+    640 audio samples that belong to it, so the client can play picture and sound in sync. answer is the number of
+    the answer whose speech the frame's first sample carries (answers count 1, 2, ... in the order they are sent,
+    closed by end_answer() or interrupt()); 0 = idle, or an interrupted answer, whose audio is sent silent.
     """
 
     def __init__(self, sdk: AvatarSDK, source_path, on_frame, out_height=OUT_HEIGHT, jpeg_quality=JPEG_QUALITY,
@@ -190,8 +192,12 @@ class StreamSession:
         self.sdk, self.on_frame = sdk, on_frame
         self.out_height, self.jpeg_quality = out_height, jpeg_quality
         self.speech = bytearray()            # queued speech, float32 bytes at 16 kHz
+        self.speech_answers = deque()        # [answer, samples] runs labelling self.speech, in order
+        self.answer = 1                      # the answer that incoming speech belongs to
+        self.silenced_upto = 0               # answers up to this number were interrupted
         self.lock = threading.Lock()
         self.fed = np.zeros(PREFIX, dtype=np.float32)   # all audio fed so far, incl. the Ditto prefix
+        self.fed_answers = np.zeros(PREFIX, dtype=np.int32)   # answer number per fed sample (0 = idle)
         self.fed_offset = 0                  # samples dropped from the front of self.fed
         self.next_window = 0                 # next HuBERT window index to submit
         self.out_idx = 0
@@ -231,12 +237,25 @@ class StreamSession:
             if self.stats["first_speech_in"] is None and len(a):
                 self.stats["first_speech_in"] = time.time()
             self.speech += a.tobytes()
+            if self.speech_answers and self.speech_answers[-1][0] == self.answer:
+                self.speech_answers[-1][1] += len(a)
+            elif len(a):
+                self.speech_answers.append([self.answer, len(a)])
             self.gate.add_received(a)
 
+    def end_answer(self):
+        """The current answer's speech is complete; speech after this belongs to the next answer."""
+        with self.lock:
+            self.answer += 1
+
     def interrupt(self):
-        """Drop queued speech (barge-in). Frames already in the pipeline still play out (~latency)."""
+        """Drop queued speech (barge-in) and close the current answer. Frames already in the pipeline still play out
+        (~latency), with their audio silenced."""
         with self.lock:
             self.speech = bytearray()
+            self.speech_answers.clear()
+            self.silenced_upto = self.answer
+            self.answer += 1
 
     def queued_seconds(self):
         with self.lock:
@@ -257,11 +276,13 @@ class StreamSession:
                     n = min(len(self.speech) // 4, TICK_SAMPLES)
                     take = np.frombuffer(bytes(self.speech[: n * 4]), dtype=np.float32)
                     del self.speech[: n * 4]
+                    labels = self._take_answer_labels(n)
                 if n and self.stats["speech_frame_start"] is None:
                     self.stats["speech_frame_start"] = (len(self.fed) - PREFIX + self.fed_offset) // SPF
                 chunk = np.concatenate([take, np.zeros(TICK_SAMPLES - n, dtype=np.float32)])
                 self.gate.push(chunk, n)
                 self.fed = np.concatenate([self.fed, chunk])
+                self.fed_answers = np.concatenate([self.fed_answers, labels, np.zeros(TICK_SAMPLES - n, dtype=np.int32)])
                 self._submit_ready_windows()
                 next_t += TICK_FRAMES / FPS
                 delay = next_t - time.monotonic()
@@ -274,6 +295,20 @@ class StreamSession:
         except Exception as e:                # surfaced through close()
             self.sdk.worker_exception = e
             self.sdk.stop_event.set()
+
+    def _take_answer_labels(self, n):
+        """Answer number for each of the next n queued samples (call with self.lock held)."""
+        labels = np.empty(n, dtype=np.int32)
+        pos = 0
+        while pos < n:
+            run = self.speech_answers[0]
+            k = min(run[1], n - pos)
+            labels[pos: pos + k] = run[0]
+            pos += k
+            run[1] -= k
+            if run[1] == 0:
+                self.speech_answers.popleft()
+        return labels
 
     def _submit_ready_windows(self):
         total = len(self.fed) + self.fed_offset
@@ -291,7 +326,7 @@ class StreamSession:
         keep = 10 * SR
         if len(self.fed) > keep + SPLIT_LEN:
             cut = len(self.fed) - keep
-            self.fed, self.fed_offset = self.fed[cut:], self.fed_offset + cut
+            self.fed, self.fed_answers, self.fed_offset = self.fed[cut:], self.fed_answers[cut:], self.fed_offset + cut
             for fid in [f for f in self.ctrl_info if f < self.next_window * TICK_FRAMES - 50]:
                 del self.ctrl_info[fid]
 
@@ -303,12 +338,15 @@ class StreamSession:
         ok, jpg = cv2.imencode(".jpg", cv2.cvtColor(img, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality])
         s = PREFIX + fid * SPF - self.fed_offset
         pcm = self.fed[s: s + SPF] if s >= 0 else np.zeros(SPF, dtype=np.float32)
+        answer = int(self.fed_answers[s]) if 0 <= s < len(self.fed_answers) else 0
+        if answer and answer <= self.silenced_upto:      # interrupted: the face finishes the motion, without sound
+            answer, pcm = 0, np.zeros(SPF, dtype=np.float32)
         pcm16 = (np.clip(pcm, -1, 1) * 32767).astype("<i2").tobytes()
         self.stats["frames"] = self.out_idx
         st = self.stats
         if st["first_speech_frame_out"] is None and st["speech_frame_start"] is not None and fid >= st["speech_frame_start"]:
             st["first_speech_frame_out"] = time.time()
-        self.on_frame(fid, jpg.tobytes(), pcm16)
+        self.on_frame(fid, answer, jpg.tobytes(), pcm16)
 
     def latency_report(self):
         st = self.stats
