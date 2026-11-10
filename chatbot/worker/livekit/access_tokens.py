@@ -18,5 +18,6 @@ class AccessTokenIssuer:
         access_token.with_identity(participant_identity)
         access_token.with_attributes(attributes)
         access_token.with_ttl(datetime.timedelta(minutes=config.VOICE_TOKEN_LIFETIME_MINUTES))
-        access_token.with_grants(api.VideoGrants(room_join=True, room=room_name))
+        # can_update_own_metadata: the page changes its voice attribute during a call
+        access_token.with_grants(api.VideoGrants(room_join=True, room=room_name, can_update_own_metadata=True))
         return access_token.to_jwt()

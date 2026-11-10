@@ -173,6 +173,7 @@ class ChatRequestHandler(BaseHTTPRequestHandler):
         language_code = query.get("language", [""])[0].strip()
         model_key = query.get("model", [""])[0].strip()
         speak_greeting = query.get("speak_greeting", ["true"])[0].strip()
+        voice_key = query.get("voice", [""])[0].strip()
         if self.voice_disabled_reason:
             self.send_json({"error": self.voice_disabled_reason}, status=503)
             return
@@ -189,6 +190,7 @@ class ChatRequestHandler(BaseHTTPRequestHandler):
             config.VOICE_MODEL_ATTRIBUTE: model_choice.key,
             config.VOICE_SESSION_ATTRIBUTE: session_id,
             config.VOICE_GREETING_ATTRIBUTE: speak_greeting,
+            config.VOICE_VOICE_ATTRIBUTE: voice_key,
         }
         token = self.token_issuer.issue_token(room_name, f"{config.VOICE_VISITOR_IDENTITY_PREFIX}{uuid.uuid4().hex[:8]}", attributes)
         self.send_json({"url": config.LIVEKIT_PUBLIC_URL, "token": token, "room": room_name})
@@ -222,8 +224,14 @@ class ChatRequestHandler(BaseHTTPRequestHandler):
                 "greeting": language.greeting,
                 "speech_recognition_model": self.stages.listening_stage.describe_speech_recognizer(language),
             })
+        voices = []
+        for choice in config.VOICE_CHOICES:
+            voices.append({"key": choice.key, "label": choice.label})
         return {
             "languages": languages,
+            # Labels and keys only: the ElevenLabs voice ids never reach the page.
+            "voices": voices,
+            "voice_attribute": config.VOICE_VOICE_ATTRIBUTE,
             "default_language_code": config.DEFAULT_LANGUAGE_CODE,
             "models": models,
             "default_model_key": config.DEFAULT_LANGUAGE_MODEL.key,
@@ -350,6 +358,9 @@ class ChatServer:
                 print(f"The {language.name} knowledge base is not indexed yet. Run 'python main.py index-knowledge' first.", flush=True)
                 raise SystemExit(1)
             knowledge_lookup.find_relevant_passages("warm-up search", "warm-up search")
+            # Without voice calls (no LiveKit server, e.g. text-only testing) nothing listens, so skip the speech model.
+            if voice_disabled_reason:
+                continue
             self.stages.listening_stage.warm_up(language)
             print(f"{language.name} speech-to-text: {self.stages.listening_stage.describe_speech_recognizer(language)}", flush=True)
         if self.stages.listening_stage.speech_recognizer_notice():

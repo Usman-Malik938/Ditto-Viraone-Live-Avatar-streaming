@@ -30,3 +30,6 @@ qdrant_data/
 
 # Local LiveKit server binary (downloaded, not built here)
 tools/
+
+# Local test server log
+logs_local/

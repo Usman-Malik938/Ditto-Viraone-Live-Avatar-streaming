@@ -1,5 +1,6 @@
 """Runs the LiveKit voice agent and wires the stages in order: listening, reasoning, speaking, avatar."""
 import asyncio
+import logging
 import threading
 
 # LiveKit plugins must be imported on the main thread before any call starts; the stages import them again lazily.
@@ -13,6 +14,8 @@ from worker.stages.listening.handler import ListeningStage
 from worker.stages.avatar.handler import AvatarStage
 from worker.stages.reasoning.handler import ReasoningStage
 from worker.stages.speaking.handler import SpeakingStage
+
+logger = logging.getLogger(__name__)
 
 
 class VoiceAgentWorker:
@@ -54,7 +57,8 @@ class VoiceAgentWorker:
         avatar_call = None
         if self.speaking_stage.speech_enabled and not job_context.is_fake_job():
             avatar_call = await self.avatar_stage.join_call()
-        text_to_speech = self.speaking_stage.build_live_text_to_speech(language, for_avatar=avatar_call is not None)
+        text_to_speech = self.speaking_stage.build_live_text_to_speech(language, for_avatar=avatar_call is not None,
+                                                                       voice_choice=call_settings.voice_choice)
         session = AgentSession(
             vad=self.voice_activity_detector,
             stt=self.listening_stage.build_live_speech_to_text(language),
@@ -74,6 +78,8 @@ class VoiceAgentWorker:
             def end_call_when_visitor_leaves(participant):
                 if participant.identity.startswith(config.VOICE_VISITOR_IDENTITY_PREFIX):
                     job_context.shutdown(reason="the visitor left")
+        if text_to_speech is not None:
+            self.follow_voice_changes(job_context.room, text_to_speech, language)
         await job_context.room.local_participant.set_attributes({config.AVATAR_STATE_ATTRIBUTE: self.describe_avatar(avatar_call)})
         # Without ElevenLabs there is no voice, so replies go out as text only; with the avatar, the avatar publishes
         # the voice together with the video. record=False keeps calls off LiveKit Cloud.
@@ -83,6 +89,19 @@ class VoiceAgentWorker:
         turn_bell = self.speaking_stage.build_turn_bell()
         if turn_bell is not None and not job_context.is_fake_job():
             await turn_bell.start(job_context.room, session)
+
+    def follow_voice_changes(self, room, text_to_speech, language):
+        """The page sets its voice attribute when the visitor picks another voice during the call."""
+
+        @room.on("participant_attributes_changed")
+        def switch_voice(changed_attributes, participant):
+            if config.VOICE_VOICE_ATTRIBUTE not in changed_attributes:
+                return
+            if not participant.identity.startswith(config.VOICE_VISITOR_IDENTITY_PREFIX):
+                return
+            voice_choice = config.find_voice_choice(changed_attributes[config.VOICE_VOICE_ATTRIBUTE])
+            self.speaking_stage.switch_voice(text_to_speech, language, voice_choice)
+            logger.info("voice switched to %s", voice_choice.label if voice_choice else "the language's default voice")
 
     def describe_avatar(self, avatar_call):
         """Tells the page whether to wait for video or show the still portrait."""
@@ -130,4 +149,8 @@ class CallSettings:
         if self.model_choice is None:
             self.model_choice = config.DEFAULT_LANGUAGE_MODEL
         self.session_id = attributes.get(config.VOICE_SESSION_ATTRIBUTE, "")
+        # Unknown or missing = the first configured voice (or the language's own voice when none are configured)
+        self.voice_choice = config.find_voice_choice(attributes.get(config.VOICE_VOICE_ATTRIBUTE, ""))
+        if self.voice_choice is None and config.VOICE_CHOICES:
+            self.voice_choice = config.VOICE_CHOICES[0]
         self.speak_greeting = attributes.get(config.VOICE_GREETING_ATTRIBUTE, "true") == "true"

@@ -116,6 +116,7 @@ button.primary:disabled { opacity: 0.6; cursor: default; }
   <h1>ViraOne voice</h1>
   <div class="controls">
     <select id="language" aria-label="Conversation language"></select>
+    <select id="voice" aria-label="Avatar voice" title="The avatar's voice; you can switch it during a call" hidden></select>
     <button id="toggle" class="primary" type="button">Start talking</button>
   </div>
   <div id="stage" class="stage" data-state="idle">
@@ -261,10 +262,15 @@ class VoiceCall {
     return this.room !== null;
   }
 
-  async start(languageCode, avatarStateAttribute) {
+  /* The agent watches this attribute and speaks the next sentence in the new voice; the call goes on. */
+  async switchVoice(voiceAttribute, voiceKey) {
+    await this.room.localParticipant.setAttributes({ [voiceAttribute]: voiceKey });
+  }
+
+  async start(languageCode, avatarStateAttribute, voiceKey) {
     this.avatarStateAttribute = avatarStateAttribute;
     this.onStateChange("connecting");
-    const query = "session_id=" + encodeURIComponent(crypto.randomUUID()) + "&language=" + encodeURIComponent(languageCode) + "&speak_greeting=true";
+    const query = "session_id=" + encodeURIComponent(crypto.randomUUID()) + "&language=" + encodeURIComponent(languageCode) + "&speak_greeting=true&voice=" + encodeURIComponent(voiceKey);
     const response = await fetch("/api/voice-token?" + query);
     const connection = await response.json();
     if (!response.ok) {
@@ -361,6 +367,8 @@ class VoiceCall {
 class VoicePage {
   constructor() {
     this.languageSelect = document.getElementById("language");
+    this.voiceSelect = document.getElementById("voice");
+    this.voiceAttribute = "";
     this.toggleButton = document.getElementById("toggle");
     this.status = document.getElementById("status");
     this.statusText = document.getElementById("status-text");
@@ -369,6 +377,7 @@ class VoicePage {
     this.call = new VoiceCall(this.transcriptView, this.stageView, this.showState.bind(this));
     this.avatarStateAttribute = "";
     this.toggleButton.addEventListener("click", this.handleToggle.bind(this));
+    this.voiceSelect.addEventListener("change", this.handleVoiceChange.bind(this));
   }
 
   async loadLanguages() {
@@ -381,6 +390,15 @@ class VoicePage {
       this.languageSelect.appendChild(option);
     }
     this.languageSelect.value = settings.default_language_code;
+    // Labels only (Voice 1, Voice 2, ...); the server keeps the ElevenLabs ids. The first is the default.
+    for (const voice of settings.voices || []) {
+      const option = document.createElement("option");
+      option.value = voice.key;
+      option.textContent = voice.label;
+      this.voiceSelect.appendChild(option);
+    }
+    this.voiceSelect.hidden = !(settings.voices || []).length;
+    this.voiceAttribute = settings.voice_attribute;
     this.avatarStateAttribute = settings.avatar_state_attribute;
     this.stageView.showPortrait(settings.avatar_portrait_url);
     if (!settings.voice_enabled) {
@@ -396,7 +414,7 @@ class VoicePage {
         await this.call.stop();
       } else {
         this.transcriptView.clear();
-        await this.call.start(this.languageSelect.value, this.avatarStateAttribute);
+        await this.call.start(this.languageSelect.value, this.avatarStateAttribute, this.voiceSelect.value);
       }
     } catch (callError) {
       console.error(callError);
@@ -404,6 +422,17 @@ class VoicePage {
       this.showError("Could not connect: " + callError.message);
     }
     this.toggleButton.disabled = false;
+  }
+
+  async handleVoiceChange() {
+    if (!this.call.isActive()) {
+      return;
+    }
+    try {
+      await this.call.switchVoice(this.voiceAttribute, this.voiceSelect.value);
+    } catch (voiceError) {
+      this.showError("Couldn't switch the voice: " + voiceError.message);
+    }
   }
 
   showState(state) {

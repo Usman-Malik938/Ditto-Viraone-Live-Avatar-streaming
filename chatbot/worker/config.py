@@ -38,6 +38,9 @@ VOICE_MODEL_ATTRIBUTE = "model"
 VOICE_SESSION_ATTRIBUTE = "session_id"
 # "true" makes the agent speak the greeting; the test console sends "false" once a conversation has started.
 VOICE_GREETING_ATTRIBUTE = "speak_greeting"
+# The voice the page picked ("voice-1", ...). The page can change it during a call; the agent switches from the next
+# sentence on.
+VOICE_VOICE_ATTRIBUTE = "voice"
 # Set by the agent on itself: "on" (video coming), "unavailable" (busy or unreachable) or "off"; the page shows the
 # still portrait unless it's "on".
 AVATAR_STATE_ATTRIBUTE = "viraone.avatar"
@@ -192,6 +195,39 @@ ELEVENLABS_TEXT_TO_SPEECH_ENABLED = (os.getenv("ELEVENLABS_TEXT_TO_SPEECH_ENABLE
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID") or "JBFqnCBsd6RMkjVDRZzb"
 ELEVENLABS_VOICE_ID_PL = os.getenv("ELEVENLABS_VOICE_ID_PL") or ELEVENLABS_VOICE_ID
 ELEVENLABS_MODEL = os.getenv("ELEVENLABS_MODEL") or "eleven_flash_v2_5"
+
+
+@dataclass(frozen=True)
+class VoiceChoice:
+    """One voice the pages offer. The page only ever sees the key and the label; the ElevenLabs id stays here."""
+
+    key: str
+    label: str
+    voice_id: str
+
+
+def read_voice_choices():
+    """ELEVENLABS_VOICE_IDS in .env: comma-separated ElevenLabs voice ids, shown as Voice 1, Voice 2, ... in that
+    order; the first is the default. Empty = no voice picker, each language keeps its own voice."""
+    voice_ids = []
+    for voice_id in os.getenv("ELEVENLABS_VOICE_IDS", "").split(","):
+        if voice_id.strip() and voice_id.strip() not in voice_ids:
+            voice_ids.append(voice_id.strip())
+    choices = []
+    for position, voice_id in enumerate(voice_ids, start=1):
+        choices.append(VoiceChoice(f"voice-{position}", f"Voice {position}", voice_id))
+    return choices
+
+
+VOICE_CHOICES = read_voice_choices()
+
+
+def find_voice_choice(voice_key):
+    """None for an empty or unknown key, or when no voices are configured; the language's own voice is used then."""
+    for choice in VOICE_CHOICES:
+        if choice.key == voice_key:
+            return choice
+    return None
 
 
 @dataclass(frozen=True)

@@ -338,6 +338,7 @@ button.bubble[aria-pressed="true"] { border-color: var(--signal); box-shadow: 0 
       <select class="fact language-select" id="model-select" autocomplete="off" aria-label="Language model" title="Language model. Groq is free; OpenAI models use paid credit. Switching starts a new conversation."></select>
       <span class="fact" id="fact-speech" title="Speech-to-text model">speech …</span>
       <select class="fact language-select" id="language-select" aria-label="Conversation language" title="Conversation language: each has its own knowledge base, prompt and speech models"></select>
+      <select class="fact language-select" id="voice-select" aria-label="Avatar voice" title="The avatar's voice. You can switch it during a call: the next sentence uses the new voice." hidden></select>
       <button class="button-quiet" id="new-conversation" type="button">New conversation</button>
     </div>
   </header>
@@ -422,6 +423,7 @@ const state = {
   sessionId: crypto.randomUUID(),
   languageCode: "en",
   modelKey: "",
+  voiceKey: "",
   settings: {
     languages: [{ code: "en", name: "English", greeting: "Hi! How can I help you?", speech_recognition_model: "unknown" }],
     target_reply_start_seconds: 1.2, speech_output_enabled: false, voice_enabled: false, reply_details_topic: ""
@@ -554,7 +556,7 @@ class VoiceCall {
      transcription is not shown again. Mid-conversation calls skip the greeting. */
   async start() {
     this.greetingPending = state.replies.length === 0;
-    const query = "session_id=" + encodeURIComponent(state.sessionId) + "&language=" + encodeURIComponent(state.languageCode) + "&model=" + encodeURIComponent(state.modelKey) + "&speak_greeting=" + this.greetingPending;
+    const query = "session_id=" + encodeURIComponent(state.sessionId) + "&language=" + encodeURIComponent(state.languageCode) + "&model=" + encodeURIComponent(state.modelKey) + "&speak_greeting=" + this.greetingPending + "&voice=" + encodeURIComponent(state.voiceKey);
     const response = await fetch("/api/voice-token?" + query);
     const connection = await response.json();
     if (!response.ok) {
@@ -577,6 +579,11 @@ class VoiceCall {
       this.showAgentState(participant.attributes["lk.agent.state"]);
       this.showAvatarState(participant.attributes[state.settings.avatar_state_attribute]);
     }
+  }
+
+  /* The agent watches this attribute and speaks the next sentence in the new voice; the call goes on. */
+  async switchVoice(voiceKey) {
+    await this.room.localParticipant.setAttributes({ [state.settings.voice_attribute]: voiceKey });
   }
 
   async setMicrophoneMuted(isMuted) {
@@ -1340,6 +1347,33 @@ function renderModelSelect() {
   modelSelect.value = state.modelKey;
 }
 
+// Voices are labelled Voice 1, Voice 2, ...; the server keeps their ElevenLabs ids. The first is the default.
+function renderVoiceSelect() {
+  const voiceSelect = document.getElementById("voice-select");
+  const voices = state.settings.voices || [];
+  voiceSelect.textContent = "";
+  for (const voice of voices) {
+    const option = createElement("option", "", voice.label);
+    option.value = voice.key;
+    voiceSelect.appendChild(option);
+  }
+  state.voiceKey = voices.length ? voices[0].key : "";
+  voiceSelect.value = state.voiceKey;
+  voiceSelect.hidden = voices.length === 0;
+}
+
+// Unlike the model and the language, the voice can change mid-conversation: no new conversation, and a call keeps going.
+async function switchVoice(voiceKey) {
+  state.voiceKey = voiceKey;
+  if (voiceCall.isActive()) {
+    try {
+      await voiceCall.switchVoice(voiceKey);
+    } catch (error) {
+      addErrorMessage("Couldn't switch the voice during the call: " + error.message);
+    }
+  }
+}
+
 async function loadSettings() {
   try {
     const response = await fetch("/api/settings");
@@ -1362,6 +1396,7 @@ async function loadSettings() {
   }
   languageSelect.value = state.languageCode;
   applyLanguage();
+  renderVoiceSelect();
   const voiceNotice = document.getElementById("voice-notice");
   if (!state.settings.voice_enabled) {
     voiceNotice.textContent = state.settings.voice_disabled_reason;
@@ -1401,6 +1436,9 @@ document.getElementById("language-select").addEventListener("change", function (
 });
 document.getElementById("model-select").addEventListener("change", function (event) {
   switchModel(event.target.value);
+});
+document.getElementById("voice-select").addEventListener("change", function (event) {
+  switchVoice(event.target.value);
 });
 
 renderEmptyDetails();
