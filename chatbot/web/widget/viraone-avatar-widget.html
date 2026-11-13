@@ -10,6 +10,9 @@
                   full: the circle with a Talk button, voice list and status line below it
     data-timing   true shows the response-time panel under the avatar. Without touching the code, adding
                   ?viraone-timing to the page address (or #viraone-timing) turns it on too.
+    data-ring-color  the ring's colour between calls, e.g. #236FF9 to match the page's own picture border
+    data-mount    manual: don't mount on page load; the page calls window.ViraOneAvatar.mount(element) itself.
+                  Use it on React pages rendered on the server, so the widget appears only after React has taken over.
   The page must be served over HTTPS (browsers allow the microphone only there).
 -->
 <div id="viraone-avatar" data-server="https://YOUR-POD-ID-8080.proxy.runpod.net" data-key="YOUR-ACCESS-KEY" data-language="pl" data-size="220px" data-layout="circle"></div>
@@ -264,6 +267,9 @@
     widget.dataset.layout = this.layout;
     if (this.root.dataset.size) {
       widget.style.setProperty("--viraone-size", this.root.dataset.size);
+    }
+    if (this.root.dataset.ringColor) {
+      widget.style.setProperty("--viraone-ring-idle", this.root.dataset.ringColor);
     }
     widget.innerHTML =
       '<div class="viraone-frame" data-state="idle">' +
@@ -732,8 +738,8 @@
     return line;
   };
 
-  /* Mounts every element with id="viraone-avatar" (or data-viraone-avatar) once. React pages that render the div
-     later can call window.ViraOneAvatar.mount(element). */
+  /* Mounts every element with id="viraone-avatar" (or data-viraone-avatar) once, except data-mount="manual" ones.
+     React pages call window.ViraOneAvatar.mount(element) themselves once the div is rendered. */
   function mount(element) {
     if (!element || element.viraoneWidget) {
       return element && element.viraoneWidget;
@@ -744,7 +750,7 @@
   }
 
   function mountAll() {
-    var elements = document.querySelectorAll("#viraone-avatar, [data-viraone-avatar]");
+    var elements = document.querySelectorAll("#viraone-avatar:not([data-mount=manual]), [data-viraone-avatar]:not([data-mount=manual])");
     for (var position = 0; position < elements.length; position++) {
       mount(elements[position]);
     }

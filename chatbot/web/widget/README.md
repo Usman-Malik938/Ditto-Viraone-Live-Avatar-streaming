@@ -29,6 +29,8 @@ All the AI runs on the avatar server (the RunPod GPU pod). The widget only shows
 | `data-size` | The circle's diameter: the old profile picture's size, for example `160px`, or `100%` to fill its box. Default `220px`. |
 | `data-layout` | `circle` (default): only the circle with its two badges, a drop-in for the profile picture. `full`: the circle with a Talk button, a voice list and a status line below it. |
 | `data-timing` | `true` shows the response-time panel under the avatar (see below). |
+| `data-ring-color` | The ring's colour between calls, for example `#236FF9` to match the page's own picture border. |
+| `data-mount` | `manual`: don't mount on page load; the page calls `window.ViraOneAvatar.mount(element)` itself (React pages rendered on the server). |
 
 On the server, add the SCARD site to `.env`, then restart the server:
 
@@ -44,10 +46,16 @@ Plain HTML: replace the `<img>` of the profile picture with the whole file, then
 
 ## React / Vite (the SCARD page)
 
-React doesn't run `<script>` tags placed inside components, so split the file into two parts:
+The SCARD page (`card.s4u.ag`) is a React app rendered on the server. Its profile picture is:
 
-1. **Paste the `<style>` and `<script>` blocks into `index.html`**, just before `</body>`.
-2. **Render the div** where the profile picture was, and mount it once it's in the page:
+```html
+<div class="avatar"><img src=".../Obraz-ChatGPT-10-paz-2026-09_33_29.png" alt="Avatar"></div>
+```
+
+It's a 200 px circle with a 2 px blue (`#236FF9`) border. Swap the `<img>` for the widget in two steps:
+
+1. **Paste the `<style>` and `<script>` blocks from the widget file into the app's `index.html`**, just before `</body>`. React doesn't run `<script>` tags placed inside components.
+2. **Replace the `<img>` inside `.avatar` with this component:**
 
 ```jsx
 import { useEffect, useRef } from "react";
@@ -61,16 +69,25 @@ export function ViraOneAvatar() {
     <div
       ref={ref}
       data-viraone-avatar
+      data-mount="manual"
       data-server="https://<pod-id>-8080.proxy.runpod.net"
-      data-key="<access key>"
+      data-key="<widget key>"
       data-language="pl"
-      data-size="160px"
+      data-size="200px"
+      data-ring-color="#236FF9"
+      suppressHydrationWarning
     />
   );
 }
+
+// where the picture was:
+// <div className="avatar"><ViraOneAvatar /></div>
 ```
 
-`mount()` is safe to call more than once. A div already in the page when the script loads is mounted automatically, whether it has `id="viraone-avatar"` or `data-viraone-avatar`.
+- **`data-mount="manual"` matters on this page:** the widget appears only after React has taken over the server-rendered HTML, so React never finds unexpected content in the div.
+- **`data-size` and `data-ring-color`** keep the same size and blue ring as today's picture.
+- `mount()` is safe to call more than once. On plain HTML pages (without `data-mount="manual"`), a div already in the page is mounted automatically, whether it has `id="viraone-avatar"` or `data-viraone-avatar`.
+- **The page's background video** is muted by default. If a visitor turns its sound on, the avatar may hear it, so it's best to keep it muted during a call.
 
 ## Measuring the response time on the SCARD page
 
