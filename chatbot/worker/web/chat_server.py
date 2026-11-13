@@ -2,7 +2,9 @@
 newline-delimited JSON events, and hands out LiveKit tokens for voice calls, which the voice agent answers."""
 import base64
 import hmac
+import html
 import json
+import re
 import threading
 import uuid
 from collections import OrderedDict
@@ -19,9 +21,20 @@ from worker.stages.listening.handler import ListeningStage
 from worker.stages.reasoning.handler import ReasoningStage
 from worker.stages.reasoning.language_model_provider import LanguageModelProvider
 from worker.stages.speaking.handler import SpeakingStage
+from worker.web.session_guard import SessionGuard
 from worker.web.text_turn import TextTurn
 
 ACCESS_COOKIE_NAME = "viraone_access"
+# Pages that use the login cookie and the browser's login box; every other path is API, portrait or the widget.
+CONSOLE_PAGE_PATHS = ("/", "/index.html", "/voice", "/voice.html")
+# The widget's visitor token: a random id the browser keeps (anything else falls back to the IP address).
+VISITOR_TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9-]{8,64}$")
+ACCESS_IN_ADDRESS_PATTERN = re.compile(r"access=[^&\s\"]*")
+REFUSAL_MESSAGES = {
+    "rate_limited": "Too many requests from this address. Wait a moment and try again.",
+    "visitor_limit": "This visitor has used up the calls allowed per hour.",
+    "ip_limit": "This address has used up the calls allowed per hour.",
+}
 
 
 class ConversationRegistry:
@@ -58,6 +71,8 @@ class ConsoleStages:
         self.speaking_stage = SpeakingStage()
         self.avatar_stage = AvatarStage()
         self.registry = ConversationRegistry(self.reasoning_stage)
+        self.session_guard = SessionGuard(config.RATE_LIMIT_REQUESTS_PER_MINUTE, config.SESSIONS_PER_VISITOR_PER_HOUR,
+                                          config.SESSIONS_PER_IP_PER_HOUR)
 
 
 class ChatRequestHandler(BaseHTTPRequestHandler):
@@ -65,15 +80,21 @@ class ChatRequestHandler(BaseHTTPRequestHandler):
     # Empty when voice calls work; otherwise why they don't (shown on the page).
     voice_disabled_reason = ""
     token_issuer = None
+    session_guard = None
+    # True when this request signed in with the console's cookie or login box (or no password is set): the team's
+    # own pages, which the per-visitor call limits don't apply to. False for the widget's ?access= requests.
+    signed_in_as_team = False
 
     def do_GET(self):
-        if not self.is_authorized():
+        if not self.passes_rate_limit() or not self.is_authorized():
             return
         request_url = urlparse(self.path)
         if request_url.path == "/" or request_url.path == "/index.html":
             self.send_page(config.WEB_PAGE_PATH)
         elif request_url.path == "/voice" or request_url.path == "/voice.html":
             self.send_page(config.VOICE_PAGE_PATH)
+        elif request_url.path == "/widget":
+            self.send_widget_demo(parse_qs(request_url.query).get("access", [""])[0])
         elif request_url.path == "/avatar-portrait":
             self.send_portrait()
         elif request_url.path == "/api/settings":
@@ -84,7 +105,7 @@ class ChatRequestHandler(BaseHTTPRequestHandler):
             self.send_error(404, "Not found")
 
     def do_POST(self):
-        if not self.is_authorized():
+        if not self.passes_rate_limit() or not self.is_authorized():
             return
         request_url = urlparse(self.path)
         if request_url.path == "/api/chat":
@@ -102,16 +123,22 @@ class ChatRequestHandler(BaseHTTPRequestHandler):
             self.send_error(404, "Not found")
 
     def is_authorized(self):
-        """WEB_ACCESS_PASSWORD guards the page; always true when no password is set. Two ways in:
-        - the private link /?access=<password>: sets a login cookie for a day and redirects to the page without the
-          password in the address, so the page, /voice and their API calls work without a login box;
+        """WEB_ACCESS_PASSWORD guards the page; always true when no password is set. Three ways in:
+        - the private link /?access=<password> to the console or /voice: sets a login cookie for a day and redirects
+          to the page without the password in the address, so the page and its API calls work without a login box;
+        - ?access=<password> on any other request: the SCARD widget, which runs on another site where our cookie
+          isn't sent, adds it to every request;
         - HTTP basic auth (any user name), which the browser asks for when there is no cookie."""
+        self.signed_in_as_team = True
         if not config.WEB_ACCESS_PASSWORD:
             return True
         if self.matches_password(SimpleCookie(self.headers.get("Cookie", "")).get(ACCESS_COOKIE_NAME)):
             return True
         request_url = urlparse(self.path)
         link_password = parse_qs(request_url.query).get("access", [""])[0]
+        if link_password and self.matches_password(link_password) and request_url.path not in CONSOLE_PAGE_PATHS:
+            self.signed_in_as_team = False
+            return True
         if link_password and self.matches_password(link_password):
             self.send_response(303)
             self.send_header("Set-Cookie", f"{ACCESS_COOKIE_NAME}={link_password}; Path=/; Max-Age=86400; Secure; HttpOnly; SameSite=Lax")
@@ -128,10 +155,63 @@ class ChatRequestHandler(BaseHTTPRequestHandler):
             if self.matches_password(password):
                 return True
         self.send_response(401)
-        self.send_header("WWW-Authenticate", 'Basic realm="ViraOne avatar", charset="UTF-8"')
+        self.send_cors_headers()
+        # Only pages get the browser's login box; a widget's request to the API just fails.
+        if request_url.path in CONSOLE_PAGE_PATHS:
+            self.send_header("WWW-Authenticate", 'Basic realm="ViraOne avatar", charset="UTF-8"')
         self.send_header("Content-Length", "0")
         self.end_headers()
         return False
+
+    def log_message(self, format, *args):
+        """The standard request log, with the access key in widget addresses blanked out."""
+        super().log_message(format, *(ACCESS_IN_ADDRESS_PATTERN.sub("access=***", str(arg)) for arg in args))
+
+    def passes_rate_limit(self):
+        """Every request counts, before the password check, so guessing the access key is slow too."""
+        refusal = self.session_guard.check_request(self.client_ip_address())
+        if refusal is None:
+            return True
+        self.send_refusal(refusal)
+        return False
+
+    def client_ip_address(self):
+        """The visitor's address. On RunPod every request comes through its HTTPS proxy (Cloudflare), which passes
+        the original address on in these headers."""
+        forwarded_address = self.headers.get("CF-Connecting-IP") or self.headers.get("X-Forwarded-For", "").split(",")[0]
+        return forwarded_address.strip() or self.client_address[0]
+
+    def send_refusal(self, refusal):
+        self.send_json(refusal.as_dictionary(REFUSAL_MESSAGES[refusal.code]), status=429,
+                       extra_headers={"Retry-After": str(refusal.retry_after_seconds)})
+
+    def send_cors_headers(self):
+        """Lets the SCARD page (another site) read the widget's API answers. WIDGET_ALLOWED_ORIGINS in .env lists the
+        sites allowed; "*" allows any. Without an Origin header (same-site requests) nothing is added."""
+        origin = self.headers.get("Origin", "")
+        if not origin:
+            return
+        if "*" in config.WIDGET_ALLOWED_ORIGINS or origin in config.WIDGET_ALLOWED_ORIGINS:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+
+    def send_widget_demo(self, access_key):
+        """The SCARD widget on a page of its own: the snippet exactly as his developer gets it, pointed at this server.
+        Opened as /widget?access=<password>, the key it needs comes from the link."""
+        snippet = config.WIDGET_SNIPPET_PATH.read_text(encoding="utf-8")
+        snippet = snippet.replace('data-server="https://YOUR-POD-ID-8080.proxy.runpod.net"', 'data-server=""', 1)
+        snippet = snippet.replace('data-key="YOUR-ACCESS-KEY"', f'data-key="{html.escape(access_key, quote=True)}"', 1)
+        page = ('<!doctype html><html lang="pl"><head><meta charset="utf-8">'
+                '<meta name="viewport" content="width=device-width, initial-scale=1"><title>ViraOne avatar</title>'
+                '<style>body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px 16px;'
+                'font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#f2f4f3}</style></head><body>'
+                + snippet + '</body></html>').encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(page)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(page)
 
     def matches_password(self, candidate):
         """candidate: text or a cookie morsel; compared in constant time."""
@@ -174,6 +254,7 @@ class ChatRequestHandler(BaseHTTPRequestHandler):
         model_key = query.get("model", [""])[0].strip()
         speak_greeting = query.get("speak_greeting", ["true"])[0].strip()
         voice_key = query.get("voice", [""])[0].strip()
+        visitor_token = query.get("visitor", [""])[0].strip()
         if self.voice_disabled_reason:
             self.send_json({"error": self.voice_disabled_reason}, status=503)
             return
@@ -185,6 +266,14 @@ class ChatRequestHandler(BaseHTTPRequestHandler):
             self.send_json({"error": request_error}, status=400)
             return
         room_name = f"{config.VOICE_ROOM_NAME_PREFIX}{uuid.uuid4().hex[:12]}"
+        if not self.signed_in_as_team:
+            ip_address = self.client_ip_address()
+            if not VISITOR_TOKEN_PATTERN.match(visitor_token):
+                visitor_token = f"ip-{ip_address}"
+            refusal = self.session_guard.start_widget_call(visitor_token, ip_address, room_name)
+            if refusal is not None:
+                self.send_refusal(refusal)
+                return
         attributes = {
             config.VOICE_LANGUAGE_ATTRIBUTE: language_code,
             config.VOICE_MODEL_ATTRIBUTE: model_choice.key,
@@ -245,6 +334,8 @@ class ChatRequestHandler(BaseHTTPRequestHandler):
             "avatar_portrait_url": self.portrait_url(),
             "reply_details_topic": config.REPLY_DETAILS_TOPIC,
             "target_reply_start_seconds": config.TARGET_REPLY_START_SECONDS,
+            "session_max_seconds": config.SESSION_MAX_SECONDS,
+            "call_end_attribute": config.CALL_END_ATTRIBUTE,
         }
 
     def portrait_url(self):
@@ -264,6 +355,7 @@ class ChatRequestHandler(BaseHTTPRequestHandler):
             content_type = "image/webp"
         image_bytes = portrait_path.read_bytes()
         self.send_response(200)
+        self.send_cors_headers()
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(image_bytes)))
         self.end_headers()
@@ -278,9 +370,12 @@ class ChatRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(page_bytes)
 
-    def send_json(self, payload, status=200):
+    def send_json(self, payload, status=200, extra_headers=None):
         body = json.dumps(payload).encode("utf-8")
         self.send_response(status)
+        self.send_cors_headers()
+        for header_name, header_value in (extra_headers or {}).items():
+            self.send_header(header_name, header_value)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -370,6 +465,7 @@ class ChatServer:
         ChatRequestHandler.stages = self.stages
         ChatRequestHandler.voice_disabled_reason = voice_disabled_reason
         ChatRequestHandler.token_issuer = AccessTokenIssuer()
+        ChatRequestHandler.session_guard = self.stages.session_guard
 
     def start(self):
         threading.Thread(target=self.http_server.serve_forever, daemon=True).start()

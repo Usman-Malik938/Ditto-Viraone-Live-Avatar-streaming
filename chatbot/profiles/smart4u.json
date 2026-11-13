@@ -30,5 +30,15 @@
       "en": "I can only help with questions about Smart4U's services, such as websites, advertising, videos and SCARD. What would you like to know?",
       "pl": "Mogę pomóc tylko w sprawach usług Smart4U, takich jak strony internetowe, reklama, wideo i SCARD. O co chcesz zapytać?"
     }
+  },
+  "session_messages": {
+    "time_limit": {
+      "en": "Our time is up for now. Thank you for the conversation, and feel free to come back!",
+      "pl": "Nasz czas na rozmowę właśnie minął. Dziękuję i zapraszam ponownie!"
+    },
+    "inactivity": {
+      "en": "I haven't heard anything for a while, so I'm ending our conversation. Feel free to come back anytime!",
+      "pl": "Od dłuższej chwili nic nie słyszę, więc kończę rozmowę. Zapraszam ponownie w dowolnej chwili!"
+    }
   }
 }

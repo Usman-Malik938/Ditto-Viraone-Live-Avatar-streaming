@@ -301,6 +301,8 @@ DEFAULT_LANGUAGE_CODE = os.getenv("DEFAULT_LANGUAGE_CODE") or ENGLISH.code
 # Fixed replies the LLM can only trigger with a tag ([DECLINE]), never word itself. Contact steps are worded by the
 # LLM, so they fit the conversation. Order is priority: when a reply carries several tags, the first one here wins.
 FIXED_MESSAGE_KINDS = ["decline"]
+# The goodbyes the avatar says when the session safeguards end a call (the profile's "session_messages").
+SESSION_MESSAGE_KINDS = ["time_limit", "inactivity"]
 
 # Messages (visitor and avatar together) sent to the LLM each turn: enough for follow-ups, capped for cost and latency.
 CONVERSATION_HISTORY_MAX_MESSAGES = 20
@@ -310,21 +312,27 @@ class ClientProfile:
     """The SCARD profile the avatar sits on: its contact buttons and the fixed messages per language.
     Buttons and wording differ between clients, so they live in a JSON file per client."""
 
-    def __init__(self, contact_buttons, fixed_messages):
+    def __init__(self, contact_buttons, fixed_messages, session_messages):
         self.contact_buttons = contact_buttons
         self.fixed_messages = fixed_messages
+        self.session_messages = session_messages
 
     @classmethod
     def load(cls, profile_path):
         profile = json.loads(profile_path.read_text(encoding="utf-8"))
-        for message_kind in FIXED_MESSAGE_KINDS:
-            for language_code in LANGUAGES:
-                if not profile["fixed_messages"].get(message_kind, {}).get(language_code):
-                    raise ValueError(f"{profile_path} has no '{message_kind}' fixed message for '{language_code}'.")
-        return cls(profile["contact_buttons"], profile["fixed_messages"])
+        for group_name, message_kinds in (("fixed_messages", FIXED_MESSAGE_KINDS), ("session_messages", SESSION_MESSAGE_KINDS)):
+            for message_kind in message_kinds:
+                for language_code in LANGUAGES:
+                    if not profile.get(group_name, {}).get(message_kind, {}).get(language_code):
+                        raise ValueError(f"{profile_path} has no '{message_kind}' {group_name} entry for '{language_code}'.")
+        return cls(profile["contact_buttons"], profile["fixed_messages"], profile["session_messages"])
 
     def fixed_message(self, message_kind, language_code):
         return self.fixed_messages[message_kind][language_code]
+
+    def session_message(self, message_kind, language_code):
+        """What the avatar says when it ends a call: message_kind is one of SESSION_MESSAGE_KINDS."""
+        return self.session_messages[message_kind][language_code]
 
     def contact_button_labels(self, language_code):
         labels = []
@@ -372,6 +380,28 @@ WEB_MAX_SESSIONS = 50
 # Empty = no login (this PC only). On the pod's public link set it: the browser asks for it once (any user name),
 # so strangers with the link can't spend the OpenAI and ElevenLabs credits.
 WEB_ACCESS_PASSWORD = os.getenv("WEB_ACCESS_PASSWORD", "")
+# The SCARD widget: the HTML snippet his developer pastes into the SCARD page, and the sites allowed to use this server
+# from the browser (comma-separated origins such as https://scard.example.com; "*" = any site).
+WIDGET_SNIPPET_PATH = PROJECT_ROOT / "web" / "widget" / "viraone-avatar-widget.html"
+WIDGET_ALLOWED_ORIGINS = [origin.strip().rstrip("/") for origin in (os.getenv("WIDGET_ALLOWED_ORIGINS") or "*").split(",") if origin.strip()]
+
+# Session safeguards (PoC agreement, section 3). 0 turns a limit off. Kept in memory: a server restart resets the counts.
+# Every call: ends after SESSION_MAX_SECONDS, or after SESSION_INACTIVITY_SECONDS with nobody speaking; the avatar says
+# the profile's goodbye, then the room is closed so nothing paid keeps running.
+SESSION_MAX_SECONDS = int(os.getenv("SESSION_MAX_SECONDS") or "180")
+SESSION_INACTIVITY_SECONDS = int(os.getenv("SESSION_INACTIVITY_SECONDS") or "30")
+# Widget visitors (calls started with the access key in the address; the team's console pages are exempt): one active
+# call per visitor token (a new call ends the previous one), and at most this many new calls per hour.
+SESSIONS_PER_VISITOR_PER_HOUR = int(os.getenv("SESSIONS_PER_VISITOR_PER_HOUR") or "3")
+# Per IP address, so a visitor can't get around the hourly limit by clearing the browser's visitor token.
+SESSIONS_PER_IP_PER_HOUR = int(os.getenv("SESSIONS_PER_IP_PER_HOUR") or "10")
+# Every request to this server, per IP address (also slows down guessing the access key).
+RATE_LIMIT_REQUESTS_PER_MINUTE = int(os.getenv("RATE_LIMIT_REQUESTS_PER_MINUTE") or "60")
+# The longest the goodbye may play before the room is closed anyway.
+SESSION_GOODBYE_MAX_SECONDS = 10
+# Set by the agent on itself just before it ends a call: "time_limit", "inactivity" or "replaced" (the same visitor
+# started a new call); the page shows why the call ended.
+CALL_END_ATTRIBUTE = "viraone.call_end"
 
 # Evaluation: a larger free Groq model grades the avatar's answers, whichever model answers, so grading costs nothing.
 # Pause between cases keeps under Groq's free per-minute token cap.

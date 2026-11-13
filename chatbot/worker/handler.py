@@ -8,6 +8,7 @@ from livekit.agents import AgentServer, AgentSession, JobExecutorType, cli, room
 from livekit.plugins import elevenlabs, openai, silero, turn_detector  # noqa: F401
 
 from worker import config
+from worker.livekit.call_limits import CallLimits
 from worker.livekit.knowledge_voice_agent import KnowledgeVoiceAgent
 from worker.livekit.reply_details_publisher import ReplyDetailsPublisher
 from worker.stages.listening.handler import ListeningStage
@@ -24,12 +25,14 @@ class VoiceAgentWorker:
     Pass the test console's stages and conversation registry to share them with typed chat in the same process."""
 
     def __init__(self, listening_stage=None, reasoning_stage=None, speaking_stage=None, conversation_registry=None,
-                 avatar_stage=None):
+                 avatar_stage=None, session_guard=None):
         self.listening_stage = listening_stage or ListeningStage()
         self.reasoning_stage = reasoning_stage or ReasoningStage()
         self.speaking_stage = speaking_stage or SpeakingStage()
         self.avatar_stage = avatar_stage or AvatarStage()
         self.conversation_registry = conversation_registry
+        # The web server's session guard (same process): lets a visitor's new call end their previous one.
+        self.session_guard = session_guard
         self.voice_activity_detector = None
         self.load_lock = threading.Lock()
 
@@ -65,6 +68,8 @@ class VoiceAgentWorker:
             llm=self.reasoning_stage.build_live_language_model(call_settings.model_choice),
             tts=text_to_speech,
             turn_handling=self.listening_stage.build_turn_handling(language),
+            # "away" after this long with nobody speaking; CallLimits then ends the call.
+            user_away_timeout=config.SESSION_INACTIVITY_SECONDS or None,
         )
         agent = KnowledgeVoiceAgent(self.reasoning_stage, self.find_conversation(call_settings), call_settings.speak_greeting,
                                     ReplyDetailsPublisher(job_context.room), avatar_call)
@@ -85,10 +90,26 @@ class VoiceAgentWorker:
         # the voice together with the video. record=False keeps calls off LiveKit Cloud.
         room_options = room_io.RoomOptions(audio_output=text_to_speech is not None and avatar_call is None)
         await session.start(agent=agent, room=job_context.room, room_options=room_options, record=False)
+        if not job_context.is_fake_job():
+            self.apply_call_limits(job_context, session, language)
 
         turn_bell = self.speaking_stage.build_turn_bell()
         if turn_bell is not None and not job_context.is_fake_job():
             await turn_bell.start(job_context.room, session)
+
+    def apply_call_limits(self, job_context, session, language):
+        """The session safeguards: time and silence limits, and one call per widget visitor."""
+        call_limits = CallLimits(job_context, session, language.code)
+        call_limits.start()
+        if self.session_guard is None:
+            return
+        room_name = job_context.room.name
+        self.session_guard.call_started(room_name, call_limits.end_call_from_another_thread)
+
+        async def forget_call():
+            self.session_guard.call_ended(room_name)
+
+        job_context.add_shutdown_callback(forget_call)
 
     def follow_voice_changes(self, room, text_to_speech, language):
         """The page sets its voice attribute when the visitor picks another voice during the call."""

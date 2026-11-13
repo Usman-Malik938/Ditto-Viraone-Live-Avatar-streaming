@@ -1,0 +1,760 @@
+<!--
+  ViraOne avatar widget for SCARD: the circular profile picture becomes the live avatar. Tap the circle to talk.
+  Paste this whole block where the profile picture is (plain HTML, or a React/Vite page; see the README).
+  Set on the div:
+    data-server   the avatar server's HTTPS address, e.g. https://<pod-id>-8080.proxy.runpod.net
+    data-key      the access key for that server (WEB_ACCESS_PASSWORD); protects the API credits
+    data-language pl (default) or en
+    data-size     the circle's diameter: the old profile picture's size, e.g. 160px, or 100% to fill its box
+    data-layout   circle (default): only the circle, with a mic badge and a voice badge on it
+                  full: the circle with a Talk button, voice list and status line below it
+    data-timing   true shows the response-time panel under the avatar. Without touching the code, adding
+                  ?viraone-timing to the page address (or #viraone-timing) turns it on too.
+  The page must be served over HTTPS (browsers allow the microphone only there).
+-->
+<div id="viraone-avatar" data-server="https://YOUR-POD-ID-8080.proxy.runpod.net" data-key="YOUR-ACCESS-KEY" data-language="pl" data-size="220px" data-layout="circle"></div>
+<style>
+.viraone-widget {
+  --viraone-ink: #0f1d1a;
+  --viraone-muted: #5e6f6a;
+  --viraone-line: #d8dfdc;
+  --viraone-surface: #ffffff;
+  --viraone-signal: #2a55e5;
+  --viraone-voice: #0f8b8d;
+  --viraone-listen: #7c8f89;
+  --viraone-error: #b3362f;
+  --viraone-ring-idle: var(--viraone-line);
+  position: relative; display: flex; flex-direction: column; align-items: center; gap: 12px;
+  font-family: inherit; color: var(--viraone-ink); text-align: center; line-height: 1.35;
+  -webkit-tap-highlight-color: transparent;
+}
+.viraone-widget * { box-sizing: border-box; }
+.viraone-widget [hidden] { display: none !important; }
+.viraone-widget[data-layout="circle"] { width: var(--viraone-size, 220px); max-width: 100%; gap: 0; }
+/* The ring around the circle shows the state; it sits outside the clipped circle so it isn't cut off. */
+.viraone-frame {
+  position: relative; width: var(--viraone-size, 220px); max-width: 80vw; aspect-ratio: 1 / 1; padding: 4px;
+  border-radius: 50%; background: var(--viraone-ring-idle); transition: background 0.25s ease;
+}
+.viraone-widget[data-layout="circle"] .viraone-frame { width: 100%; max-width: 100%; }
+.viraone-frame[data-state="connecting"] { background: var(--viraone-signal); animation: viraone-pulse 1s infinite; }
+.viraone-frame[data-state="listening"] { background: var(--viraone-listen); }
+.viraone-frame[data-state="thinking"] { background: var(--viraone-signal); animation: viraone-pulse 1s infinite; }
+.viraone-frame[data-state="speaking"] { background: var(--viraone-voice); }
+@keyframes viraone-pulse { 50% { opacity: 0.55; } }
+@media (prefers-reduced-motion: reduce) { .viraone-frame { animation: none !important; } }
+/* clip-path as well as border-radius: iOS Safari doesn't always clip a playing video to a rounded corner. */
+.viraone-circle {
+  position: relative; width: 100%; height: 100%; border-radius: 50%; overflow: hidden;
+  clip-path: circle(50% at 50% 50%); background: #0b1110; isolation: isolate;
+}
+/* The avatar frame is tall (540x960, the same framing as the photo): fill the circle and centre the face in it.
+   --viraone-face-y moves the picture up or down (a higher value shows lower in the frame); --viraone-zoom enlarges it. */
+.viraone-video, .viraone-still {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  transform: scale(var(--viraone-zoom, 1)); transform-origin: 50% 50%;
+}
+.viraone-video { object-fit: cover; object-position: 50% var(--viraone-face-y, 55%); }
+.viraone-still { background-size: cover; background-position: 50% var(--viraone-face-y, 55%); background-repeat: no-repeat; }
+/* The whole circle is the talk button. */
+.viraone-hit {
+  position: absolute; inset: 0; z-index: 2; margin: 0; padding: 0; border: 0; border-radius: 50%;
+  background: transparent; color: inherit; cursor: pointer; font: inherit;
+}
+.viraone-hit:disabled { cursor: default; }
+.viraone-hit:focus-visible { outline: 3px solid var(--viraone-signal); outline-offset: 3px; }
+.viraone-mic, .viraone-voice-badge {
+  position: absolute; bottom: 2%; height: clamp(26px, 22%, 44px); border: 2px solid var(--viraone-surface);
+  border-radius: 999px; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+.viraone-mic {
+  right: 2%; aspect-ratio: 1 / 1; display: grid; place-items: center;
+  background: var(--viraone-signal); color: #fff;
+}
+.viraone-mic svg { width: 55%; height: 55%; }
+.viraone-hit[data-active="true"] .viraone-mic { background: var(--viraone-error); }
+.viraone-hit:disabled .viraone-mic { opacity: 0.6; }
+.viraone-voice-badge {
+  left: 2%; z-index: 3; min-width: clamp(26px, 22%, 44px); padding: 0 8px; display: inline-flex; align-items: center;
+  justify-content: center; gap: 3px; background: var(--viraone-surface); color: var(--viraone-ink);
+  font-size: 0.8rem; font-weight: 600;
+}
+.viraone-voice-badge svg { width: 14px; height: 14px; flex: none; }
+/* The real list sits invisibly over the badge, so phones open their own picker. 16px stops iOS zooming in. */
+.viraone-voice-badge .viraone-voice {
+  position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 16px;
+}
+.viraone-note { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.viraone-status { margin: 0; min-height: 1.4em; font-size: 0.95rem; color: var(--viraone-muted); max-width: 320px; }
+.viraone-note[data-error="true"] .viraone-status { color: var(--viraone-error); }
+/* Circle layout: messages float under the circle for a moment, so the SCARD page around it doesn't move. */
+.viraone-widget[data-layout="circle"] .viraone-note {
+  position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%); z-index: 10;
+  width: max-content; max-width: min(280px, 90vw); padding: 8px 12px; border: 1px solid var(--viraone-line);
+  border-radius: 12px; background: var(--viraone-surface); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+}
+.viraone-widget[data-layout="circle"] .viraone-status { min-height: 0; font-size: 0.875rem; }
+/* Nothing to say: hidden from view but still read out by screen readers. */
+.viraone-widget .viraone-note[data-quiet="true"] {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0);
+  white-space: nowrap; border: 0; box-shadow: none;
+}
+.viraone-controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; align-items: center; }
+.viraone-talk, .viraone-sound, .viraone-controls .viraone-voice {
+  font: inherit; font-size: 1rem; min-height: 48px; border-radius: 999px; border: 1px solid var(--viraone-line);
+  background: var(--viraone-surface); color: var(--viraone-ink); padding: 10px 18px;
+}
+.viraone-talk {
+  display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 600;
+  background: var(--viraone-signal); border-color: var(--viraone-signal); color: #fff;
+}
+.viraone-talk[data-active="true"] { background: var(--viraone-error); border-color: var(--viraone-error); }
+.viraone-talk:disabled { opacity: 0.6; cursor: default; }
+.viraone-talk svg { width: 20px; height: 20px; flex: none; }
+.viraone-sound { cursor: pointer; border-color: var(--viraone-voice); color: var(--viraone-voice); font-weight: 600; }
+.viraone-widget[data-layout="circle"] .viraone-sound { min-height: 40px; padding: 6px 14px; font-size: 0.9rem; }
+/* Response-time panel (data-timing="true" or ?viraone-timing in the page address). */
+.viraone-timing {
+  width: min(320px, 90vw); margin-top: 12px; padding: 12px; border: 1px solid var(--viraone-line); border-radius: 12px;
+  background: var(--viraone-surface); text-align: left; font-size: 0.85rem; color: var(--viraone-ink);
+}
+.viraone-timing-title { margin: 0 0 6px; font-weight: 600; }
+.viraone-timing-total { margin: 0; font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.viraone-timing-caption, .viraone-timing-question, .viraone-timing-average { margin: 0 0 8px; color: var(--viraone-muted); }
+.viraone-timing-question { font-style: italic; overflow-wrap: anywhere; }
+.viraone-timing-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; margin-bottom: 6px; }
+.viraone-timing-row span:last-of-type { font-variant-numeric: tabular-nums; }
+.viraone-timing-bar { grid-column: 1 / -1; height: 6px; border-radius: 3px; background: var(--viraone-line); overflow: hidden; }
+.viraone-timing-bar i { display: block; height: 100%; background: var(--viraone-signal); }
+</style>
+<script>
+(function () {
+  "use strict";
+  var LIVEKIT_CLIENT_URL = "https://cdn.jsdelivr.net/npm/livekit-client@2.22.4/dist/livekit-client.umd.js";
+  var MIC_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
+  var STOP_ICON = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
+  var SPEAKER_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg>';
+  var VISITOR_STORAGE_KEY = "viraone.visitor";
+  var VISITOR_TOKEN_PATTERN = /^[A-Za-z0-9-]{8,64}$/;
+  // How long a message stays under the circle (circle layout); state changes only show on the ring.
+  var NOTE_SECONDS = 6;
+  // The time left in a call is shown from this point on.
+  var COUNTDOWN_FROM_SECONDS = 30;
+  var TEXT = {
+    pl: {
+      start: "Porozmawiaj", end: "Zakończ", startAria: "Porozmawiaj z awatarem", endAria: "Zakończ rozmowę",
+      voice: "Głos", voiceLabel: "Głos awatara",
+      idle: "Dotknij „Porozmawiaj” i zadaj pytanie.", idleCircle: "Dotknij awatara, aby porozmawiać.",
+      connecting: "Łączenie…", initializing: "Awatar dołącza…",
+      listening: "Słucham. Po prostu mów.", thinking: "Myślę…", speaking: "Mówię. Możesz mi przerwać.",
+      avatarBusy: "Awatar jest teraz zajęty, więc rozmowa jest tylko głosowa.",
+      sound: "Dotknij, aby włączyć dźwięk", unavailable: "Awatar jest teraz niedostępny. Spróbuj później.",
+      micDenied: "Zezwól na dostęp do mikrofonu i spróbuj ponownie.", failed: "Nie udało się połączyć. Spróbuj ponownie.",
+      ended: "Rozmowa zakończona.", endedTimeLimit: "Czas rozmowy minął. Zapraszamy ponownie!",
+      endedInactivity: "Rozmowa zakończona z powodu braku aktywności.",
+      endedReplaced: "Rozmowa jest kontynuowana w innym oknie.",
+      callLimit: "Wykorzystano limit rozmów na godzinę. Spróbuj ponownie za {minutes} min.",
+      tooMany: "Za dużo prób. Spróbuj ponownie za chwilę.", remaining: "Pozostało {time}",
+      timingTitle: "Czas odpowiedzi", timingEmpty: "Zadaj pytanie, a pojawi się tu pomiar.",
+      timingCaption: "od końca Twojej wypowiedzi do odpowiedzi awatara",
+      timingWait: "Wykrycie końca wypowiedzi", timingSearch: "Wyszukiwanie w bazie wiedzy",
+      timingModel: "Model językowy (OpenAI)", timingVoice: "Głos (ElevenLabs)", timingFace: "Twarz awatara (Ditto)",
+      timingAverage: "Średnia z {count} odpowiedzi: {seconds}", timingInterrupted: "przerwana"
+    },
+    en: {
+      start: "Talk", end: "End", startAria: "Talk to the avatar", endAria: "End the call",
+      voice: "Voice", voiceLabel: "Avatar voice",
+      idle: "Tap Talk and ask a question.", idleCircle: "Tap the avatar to talk.",
+      connecting: "Connecting…", initializing: "The avatar is joining…",
+      listening: "Listening. Just speak.", thinking: "Thinking…", speaking: "Speaking. You can interrupt me.",
+      avatarBusy: "The avatar is busy right now, so this call is voice only.",
+      sound: "Tap to turn on the sound", unavailable: "The avatar is unavailable right now. Please try later.",
+      micDenied: "Allow the microphone and try again.", failed: "Couldn't connect. Please try again.",
+      ended: "Call ended.", endedTimeLimit: "Time's up for this call. Come back anytime!",
+      endedInactivity: "The call ended because nobody spoke for a while.",
+      endedReplaced: "The call continues in another window.",
+      callLimit: "The hourly call limit is used up. Try again in {minutes} min.",
+      tooMany: "Too many attempts. Please try again in a moment.", remaining: "{time} left",
+      timingTitle: "Response time", timingEmpty: "Ask a question to see the measurement here.",
+      timingCaption: "from the end of your question to the avatar's answer",
+      timingWait: "End-of-speech detection", timingSearch: "Knowledge base search",
+      timingModel: "Language model (OpenAI)", timingVoice: "Voice (ElevenLabs)", timingFace: "Avatar face (Ditto)",
+      timingAverage: "Average of {count} answers: {seconds}", timingInterrupted: "interrupted"
+    }
+  };
+  var END_REASON_TEXT = { time_limit: "endedTimeLimit", inactivity: "endedInactivity", replaced: "endedReplaced" };
+
+  var liveKitLoading = null;
+  function loadLiveKit() {
+    if (window.LivekitClient) {
+      return Promise.resolve();
+    }
+    if (!liveKitLoading) {
+      liveKitLoading = new Promise(function (resolve, reject) {
+        var script = document.createElement("script");
+        script.src = LIVEKIT_CLIENT_URL;
+        script.onload = resolve;
+        script.onerror = function () { liveKitLoading = null; reject(new Error("livekit-client did not load")); };
+        document.head.appendChild(script);
+      });
+    }
+    return liveKitLoading;
+  }
+
+  function newRandomId() {
+    if (window.crypto && crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+    return "v" + Date.now().toString(36) + Math.random().toString(36).slice(2);
+  }
+
+  /* The visitor token for the server's call limits (one call at a time, a few per hour). It's kept in the browser;
+     where storage is blocked (private mode) it lasts for this page view, and the server's per-address limit applies. */
+  var pageVisitorToken = null;
+  function visitorToken() {
+    try {
+      var saved = window.localStorage.getItem(VISITOR_STORAGE_KEY);
+      if (saved && VISITOR_TOKEN_PATTERN.test(saved)) {
+        return saved;
+      }
+      var fresh = newRandomId();
+      window.localStorage.setItem(VISITOR_STORAGE_KEY, fresh);
+      return fresh;
+    } catch (storageError) {
+      pageVisitorToken = pageVisitorToken || newRandomId();
+      return pageVisitorToken;
+    }
+  }
+
+  function timingRequestedByPage() {
+    return /(^|[?&#])viraone-timing\b/.test(window.location.search + window.location.hash);
+  }
+
+  function hasValue(value) {
+    return typeof value === "number" && isFinite(value);
+  }
+
+  /* One widget on the page: the circle (the talk button), the voice picker, messages and the optional timing panel. */
+  function AvatarWidget(root) {
+    this.root = root;
+    this.server = (root.dataset.server || window.location.origin).replace(/\/+$/, "");
+    this.key = root.dataset.key || "";
+    this.language = root.dataset.language === "en" ? "en" : "pl";
+    this.layout = root.dataset.layout === "full" ? "full" : "circle";
+    this.timingEnabled = root.dataset.timing === "true" || timingRequestedByPage();
+    this.text = TEXT[this.language];
+    this.room = null;
+    this.settings = null;
+    this.audioElements = [];
+    this.stateText = "";
+    this.noteText = "";
+    this.noteIsError = false;
+    this.noteTimer = null;
+    this.remainingText = "";
+    this.countdownTimer = null;
+    this.callStartedAt = 0;
+    this.endReason = "";
+    this.replyTimings = [];
+    this.build();
+  }
+
+  AvatarWidget.prototype.build = function () {
+    var widget = document.createElement("div");
+    widget.className = "viraone-widget";
+    widget.dataset.layout = this.layout;
+    if (this.root.dataset.size) {
+      widget.style.setProperty("--viraone-size", this.root.dataset.size);
+    }
+    widget.innerHTML =
+      '<div class="viraone-frame" data-state="idle">' +
+      '<div class="viraone-circle"><div class="viraone-still"></div>' +
+      '<video class="viraone-video" autoplay playsinline webkit-playsinline muted hidden></video></div>' +
+      '<button class="viraone-hit" type="button" disabled><span class="viraone-mic"></span></button>' +
+      '<label class="viraone-voice-badge" hidden>' + SPEAKER_ICON + '<span></span></label>' +
+      '</div>' +
+      '<div class="viraone-note"><p class="viraone-status" role="status" aria-live="polite"></p>' +
+      '<button class="viraone-sound" type="button" hidden></button></div>' +
+      '<div class="viraone-controls"><button class="viraone-talk" type="button" disabled>' + MIC_ICON +
+      '<span></span></button></div>' +
+      '<div class="viraone-timing" hidden></div>';
+    this.root.textContent = "";
+    this.root.appendChild(widget);
+    this.frame = widget.querySelector(".viraone-frame");
+    this.still = widget.querySelector(".viraone-still");
+    this.video = widget.querySelector(".viraone-video");
+    this.hitButton = widget.querySelector(".viraone-hit");
+    this.micBadge = widget.querySelector(".viraone-mic");
+    this.voiceBadge = widget.querySelector(".viraone-voice-badge");
+    this.voiceBadgeNumber = this.voiceBadge.querySelector("span");
+    this.note = widget.querySelector(".viraone-note");
+    this.status = widget.querySelector(".viraone-status");
+    this.soundButton = widget.querySelector(".viraone-sound");
+    this.controls = widget.querySelector(".viraone-controls");
+    this.talkButton = widget.querySelector(".viraone-talk");
+    this.talkLabel = this.talkButton.querySelector("span");
+    this.timingPanel = widget.querySelector(".viraone-timing");
+
+    // One voice list, placed as a badge on the circle or next to the Talk button.
+    this.voiceSelect = document.createElement("select");
+    this.voiceSelect.className = "viraone-voice";
+    this.voiceSelect.setAttribute("aria-label", this.text.voiceLabel);
+    if (this.layout === "circle") {
+      this.voiceBadge.appendChild(this.voiceSelect);
+      this.controls.hidden = true;
+    } else {
+      this.voiceSelect.hidden = true;
+      this.controls.appendChild(this.voiceSelect);
+    }
+    this.soundButton.textContent = this.text.sound;
+    this.hitButton.addEventListener("click", this.handleTalk.bind(this));
+    this.talkButton.addEventListener("click", this.handleTalk.bind(this));
+    this.voiceSelect.addEventListener("change", this.handleVoiceChange.bind(this));
+    this.soundButton.addEventListener("click", this.handleSoundTap.bind(this));
+    this.video.addEventListener("playing", this.handleVideoPlaying.bind(this));
+    this.setActive(false);
+    if (this.timingEnabled) {
+      this.timingPanel.hidden = false;
+      this.renderTimings();
+    }
+  };
+
+  /* Every request carries the access key in the address: the widget runs on another site, where the server's
+     login cookie isn't sent. */
+  AvatarWidget.prototype.url = function (path, query) {
+    var params = new URLSearchParams(query || {});
+    params.set("access", this.key);
+    return this.server + path + "?" + params.toString();
+  };
+
+  AvatarWidget.prototype.load = async function () {
+    this.showState(this.layout === "circle" ? this.text.idleCircle : this.text.idle);
+    try {
+      var response = await fetch(this.url("/api/settings"));
+      if (!response.ok) {
+        throw new Error("settings: status " + response.status);
+      }
+      this.settings = await response.json();
+    } catch (error) {
+      console.error("ViraOne avatar:", error);
+      this.showNote(this.text.unavailable, true);
+      return;
+    }
+    if (this.settings.avatar_portrait_url) {
+      this.still.style.backgroundImage = "url('" + this.url(this.settings.avatar_portrait_url) + "')";
+    }
+    var voices = this.settings.voices || [];
+    for (var position = 0; position < voices.length; position++) {
+      var option = document.createElement("option");
+      option.value = voices[position].key;
+      option.textContent = this.text.voice + " " + (position + 1);
+      this.voiceSelect.appendChild(option);
+    }
+    var hasChoice = voices.length > 1;
+    this.voiceBadge.hidden = !hasChoice || this.layout !== "circle";
+    this.voiceSelect.hidden = !hasChoice;
+    this.showVoiceNumber();
+    if (!this.settings.voice_enabled) {
+      this.showNote(this.text.unavailable, true);
+      return;
+    }
+    this.hitButton.disabled = false;
+    this.talkButton.disabled = false;
+  };
+
+  AvatarWidget.prototype.handleTalk = async function () {
+    // During a call where the phone still blocks sound, a tap on the circle turns the sound on rather than hanging up.
+    if (this.room && !this.room.canPlaybackAudio) {
+      await this.handleSoundTap();
+      return;
+    }
+    this.hitButton.disabled = true;
+    this.talkButton.disabled = true;
+    if (this.room) {
+      await this.stop();
+      this.showNote(this.text.ended);
+    } else {
+      await this.start();
+    }
+    this.hitButton.disabled = false;
+    this.talkButton.disabled = false;
+  };
+
+  AvatarWidget.prototype.start = async function () {
+    this.clearNote();
+    this.endReason = "";
+    this.frame.dataset.state = "connecting";
+    this.showState(this.text.connecting);
+    try {
+      await loadLiveKit();
+      var response = await fetch(this.url("/api/voice-token", {
+        session_id: newRandomId(), language: this.language, speak_greeting: "true",
+        voice: this.voiceSelect.value || "", visitor: visitorToken()
+      }));
+      var connection = await response.json();
+      if (response.status === 429) {
+        this.frame.dataset.state = "idle";
+        this.showRefusal(connection);
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(connection.error || "voice-token: status " + response.status);
+      }
+      var LK = window.LivekitClient;
+      var room = new LK.Room({ adaptiveStream: true });
+      this.room = room;
+      room.on(LK.RoomEvent.TrackSubscribed, this.handleTrackSubscribed.bind(this));
+      room.on(LK.RoomEvent.TrackUnsubscribed, this.handleTrackUnsubscribed.bind(this));
+      room.on(LK.RoomEvent.ParticipantConnected, this.readAgent.bind(this));
+      room.on(LK.RoomEvent.ParticipantAttributesChanged, this.handleAttributesChanged.bind(this));
+      room.on(LK.RoomEvent.AudioPlaybackStatusChanged, this.showSoundButtonIfBlocked.bind(this));
+      room.on(LK.RoomEvent.Disconnected, this.handleDisconnected.bind(this));
+      if (this.timingEnabled && this.settings.reply_details_topic) {
+        room.registerTextStreamHandler(this.settings.reply_details_topic, this.handleReplyDetails.bind(this));
+      }
+      this.setActive(true);
+      this.showState(this.text.initializing);
+      await room.connect(connection.url, connection.token);
+      // Phones play sound only after a tap: the Talk tap unlocks it; if the browser still blocks it, a button appears.
+      room.startAudio().catch(function () {});
+      await room.localParticipant.setMicrophoneEnabled(true, { echoCancellation: true, noiseSuppression: true, autoGainControl: true });
+      this.showSoundButtonIfBlocked();
+      this.startCountdown();
+      var self = this;
+      room.remoteParticipants.forEach(function (participant) { self.readAgent(participant); });
+    } catch (error) {
+      console.error("ViraOne avatar:", error);
+      var micDenied = error && (error.name === "NotAllowedError" || /permission/i.test(error.message || ""));
+      await this.stop();
+      this.showNote(micDenied ? this.text.micDenied : this.text.failed, true);
+    }
+  };
+
+  /* The server's session safeguards refused the call: too many calls this hour, or too many requests. */
+  AvatarWidget.prototype.showRefusal = function (refusal) {
+    var retryMinutes = Math.max(1, Math.ceil((refusal.retry_after_seconds || 60) / 60));
+    if (refusal.code === "visitor_limit" || refusal.code === "ip_limit") {
+      this.showNote(this.text.callLimit.replace("{minutes}", retryMinutes), true);
+    } else {
+      this.showNote(this.text.tooMany, true);
+    }
+  };
+
+  AvatarWidget.prototype.stop = async function () {
+    if (this.room) {
+      var room = this.room;
+      this.room = null;
+      await room.disconnect();
+    }
+    this.reset();
+  };
+
+  AvatarWidget.prototype.reset = function () {
+    for (var position = 0; position < this.audioElements.length; position++) {
+      this.audioElements[position].remove();
+    }
+    this.audioElements = [];
+    this.video.hidden = true;
+    this.still.hidden = false;
+    this.soundButton.hidden = true;
+    this.frame.dataset.state = "idle";
+    this.avatarBusy = false;
+    this.stopCountdown();
+    this.setActive(false);
+    this.showState(this.layout === "circle" ? this.text.idleCircle : this.text.idle);
+  };
+
+  AvatarWidget.prototype.handleDisconnected = function () {
+    if (this.room) {
+      this.room = null;
+      this.reset();
+      this.showNote(this.text[END_REASON_TEXT[this.endReason]] || this.text.ended);
+    }
+  };
+
+  /* The avatar's audio track carries the voice and its video track the face; they arrive as a synced pair. */
+  AvatarWidget.prototype.handleTrackSubscribed = function (track) {
+    var LK = window.LivekitClient;
+    if (track.kind === LK.Track.Kind.Audio) {
+      var element = track.attach();
+      element.hidden = true;
+      this.root.appendChild(element);
+      this.audioElements.push(element);
+    } else if (track.kind === LK.Track.Kind.Video) {
+      track.attach(this.video);
+    }
+  };
+
+  AvatarWidget.prototype.handleTrackUnsubscribed = function (track) {
+    if (track.kind === window.LivekitClient.Track.Kind.Video) {
+      track.detach(this.video);
+      this.video.hidden = true;
+      this.still.hidden = false;
+    }
+  };
+
+  AvatarWidget.prototype.handleVideoPlaying = function () {
+    this.video.hidden = false;
+    this.still.hidden = true;
+  };
+
+  AvatarWidget.prototype.readAgent = function (participant) {
+    this.readAgentAttributes(participant.attributes);
+  };
+
+  AvatarWidget.prototype.handleAttributesChanged = function (changedAttributes, participant) {
+    if (this.room && participant !== this.room.localParticipant) {
+      this.readAgentAttributes(changedAttributes);
+    }
+  };
+
+  AvatarWidget.prototype.readAgentAttributes = function (attributes) {
+    if (attributes[this.settings.call_end_attribute]) {
+      this.endReason = attributes[this.settings.call_end_attribute];
+    }
+    this.showAvatarState(attributes[this.settings.avatar_state_attribute]);
+    this.showAgentState(attributes["lk.agent.state"]);
+  };
+
+  AvatarWidget.prototype.showAgentState = function (agentState) {
+    if (!agentState || !this.room || !this.text[agentState]) {
+      return;
+    }
+    this.frame.dataset.state = agentState;
+    this.showState(this.avatarBusy ? this.text.avatarBusy : this.text[agentState]);
+  };
+
+  AvatarWidget.prototype.showAvatarState = function (avatarState) {
+    if (avatarState === undefined) {
+      return;
+    }
+    this.avatarBusy = avatarState === "unavailable";
+    if (this.avatarBusy) {
+      this.showNote(this.text.avatarBusy);
+    }
+  };
+
+  AvatarWidget.prototype.showSoundButtonIfBlocked = function () {
+    this.soundButton.hidden = !this.room || this.room.canPlaybackAudio;
+    this.render();
+  };
+
+  AvatarWidget.prototype.handleSoundTap = async function () {
+    if (this.room) {
+      await this.room.startAudio();
+      this.showSoundButtonIfBlocked();
+    }
+  };
+
+  /* The agent watches this attribute and speaks its next sentence in the new voice; the call goes on. */
+  AvatarWidget.prototype.handleVoiceChange = async function () {
+    this.showVoiceNumber();
+    if (!this.room) {
+      return;
+    }
+    try {
+      var attributes = {};
+      attributes[this.settings.voice_attribute] = this.voiceSelect.value;
+      await this.room.localParticipant.setAttributes(attributes);
+    } catch (error) {
+      console.error("ViraOne avatar: voice switch failed", error);
+    }
+  };
+
+  AvatarWidget.prototype.showVoiceNumber = function () {
+    this.voiceBadgeNumber.textContent = String(Math.max(1, this.voiceSelect.selectedIndex + 1));
+  };
+
+  AvatarWidget.prototype.setActive = function (isActive) {
+    this.talkButton.dataset.active = String(isActive);
+    this.hitButton.dataset.active = String(isActive);
+    this.talkLabel.textContent = isActive ? this.text.end : this.text.start;
+    this.hitButton.setAttribute("aria-label", isActive ? this.text.endAria : this.text.startAria);
+    this.micBadge.innerHTML = isActive ? STOP_ICON : MIC_ICON;
+  };
+
+  /* The time left, shown during the last seconds of a call; the server ends the call at the limit. */
+  AvatarWidget.prototype.startCountdown = function () {
+    var limitSeconds = this.settings.session_max_seconds || 0;
+    if (limitSeconds <= 0) {
+      return;
+    }
+    this.callStartedAt = Date.now();
+    var self = this;
+    this.countdownTimer = window.setInterval(function () {
+      var secondsLeft = Math.ceil(limitSeconds - (Date.now() - self.callStartedAt) / 1000);
+      var remainingText = "";
+      if (secondsLeft > 0 && secondsLeft <= COUNTDOWN_FROM_SECONDS) {
+        var seconds = String(secondsLeft % 60);
+        remainingText = self.text.remaining.replace("{time}", Math.floor(secondsLeft / 60) + ":" + (seconds.length < 2 ? "0" : "") + seconds);
+      }
+      if (remainingText !== self.remainingText) {
+        self.remainingText = remainingText;
+        self.render();
+      }
+    }, 500);
+  };
+
+  AvatarWidget.prototype.stopCountdown = function () {
+    window.clearInterval(this.countdownTimer);
+    this.countdownTimer = null;
+    this.remainingText = "";
+  };
+
+  /* Messages. The state (listening, thinking...) is always there; a note (an error, the call's end) shows over it for
+     a few seconds. In the circle layout only notes, the countdown and the sound button are shown; the state shows on
+     the ring and is read out by screen readers. */
+  AvatarWidget.prototype.showState = function (text) {
+    this.stateText = text;
+    this.render();
+  };
+
+  AvatarWidget.prototype.showNote = function (text, isError) {
+    this.noteText = text;
+    this.noteIsError = Boolean(isError);
+    window.clearTimeout(this.noteTimer);
+    var self = this;
+    this.noteTimer = window.setTimeout(function () { self.clearNote(); }, NOTE_SECONDS * 1000 * (isError ? 2 : 1));
+    this.render();
+  };
+
+  AvatarWidget.prototype.clearNote = function () {
+    window.clearTimeout(this.noteTimer);
+    this.noteText = "";
+    this.noteIsError = false;
+    this.render();
+  };
+
+  AvatarWidget.prototype.render = function () {
+    var text = this.noteText || this.stateText;
+    if (this.remainingText) {
+      text = this.layout === "circle" && !this.noteText ? this.remainingText : text + " · " + this.remainingText;
+    }
+    this.status.textContent = text;
+    this.note.dataset.error = String(this.noteIsError);
+    var showsSomething = Boolean(this.noteText || this.remainingText) || !this.soundButton.hidden;
+    this.note.dataset.quiet = String(this.layout === "circle" && !showsSomething);
+  };
+
+  /* Response-time panel: the agent sends each answer's step timings once the answer has played. */
+  AvatarWidget.prototype.handleReplyDetails = async function (reader) {
+    try {
+      var details = JSON.parse(await reader.readAll());
+      this.replyTimings.push(details);
+      this.renderTimings();
+    } catch (error) {
+      console.error("ViraOne avatar: timing details unreadable", error);
+    }
+  };
+
+  /* Splits one answer into its steps, the same way as the test console: each step ends where the next begins. */
+  AvatarWidget.prototype.replySteps = function (details) {
+    var steps = [];
+    var wait = details.end_of_turn_wait_seconds || 0;
+    var cursor = 0;
+    if (wait > 0) {
+      steps.push({ label: this.text.timingWait, seconds: wait });
+    }
+    if (hasValue(details.retrieval_seconds)) {
+      steps.push({ label: this.text.timingSearch, seconds: details.retrieval_seconds });
+      cursor = details.retrieval_seconds;
+    }
+    var marks = [
+      [details.first_token_seconds, this.text.timingModel],
+      [details.first_audio_seconds, this.text.timingVoice],
+      [details.first_face_seconds, this.text.timingFace]
+    ];
+    for (var position = 0; position < marks.length; position++) {
+      if (hasValue(marks[position][0])) {
+        steps.push({ label: marks[position][1], seconds: Math.max(0, marks[position][0] - cursor) });
+        cursor = marks[position][0];
+      }
+    }
+    return { steps: steps, total: wait + cursor };
+  };
+
+  AvatarWidget.prototype.formatSeconds = function (seconds) {
+    var text = seconds.toFixed(2);
+    return (this.language === "pl" ? text.replace(".", ",") : text) + " s";
+  };
+
+  AvatarWidget.prototype.renderTimings = function () {
+    var panel = this.timingPanel;
+    panel.textContent = "";
+    var title = document.createElement("p");
+    title.className = "viraone-timing-title";
+    title.textContent = this.text.timingTitle;
+    panel.appendChild(title);
+    var answers = this.replyTimings;
+    if (!answers.length) {
+      panel.appendChild(this.timingLine("viraone-timing-caption", this.text.timingEmpty));
+      return;
+    }
+    var latest = this.replySteps(answers[answers.length - 1]);
+    panel.appendChild(this.timingLine("viraone-timing-total", this.formatSeconds(latest.total)));
+    panel.appendChild(this.timingLine("viraone-timing-caption", this.text.timingCaption));
+    var question = answers[answers.length - 1].question || "";
+    if (answers[answers.length - 1].interrupted) {
+      question += " (" + this.text.timingInterrupted + ")";
+    }
+    if (question) {
+      panel.appendChild(this.timingLine("viraone-timing-question", "„" + question + "”"));
+    }
+    for (var position = 0; position < latest.steps.length; position++) {
+      var step = latest.steps[position];
+      var row = document.createElement("div");
+      row.className = "viraone-timing-row";
+      var label = document.createElement("span");
+      label.textContent = step.label;
+      var value = document.createElement("span");
+      value.textContent = this.formatSeconds(step.seconds);
+      var bar = document.createElement("div");
+      bar.className = "viraone-timing-bar";
+      var fill = document.createElement("i");
+      fill.style.width = (latest.total > 0 ? Math.min(100, (step.seconds / latest.total) * 100) : 0) + "%";
+      bar.appendChild(fill);
+      row.append(label, value, bar);
+      panel.appendChild(row);
+    }
+    if (answers.length > 1) {
+      var sum = 0;
+      for (var index = 0; index < answers.length; index++) {
+        sum += this.replySteps(answers[index]).total;
+      }
+      panel.appendChild(this.timingLine("viraone-timing-average", this.text.timingAverage
+        .replace("{count}", answers.length).replace("{seconds}", this.formatSeconds(sum / answers.length))));
+    }
+  };
+
+  AvatarWidget.prototype.timingLine = function (className, text) {
+    var line = document.createElement("p");
+    line.className = className;
+    line.textContent = text;
+    return line;
+  };
+
+  /* Mounts every element with id="viraone-avatar" (or data-viraone-avatar) once. React pages that render the div
+     later can call window.ViraOneAvatar.mount(element). */
+  function mount(element) {
+    if (!element || element.viraoneWidget) {
+      return element && element.viraoneWidget;
+    }
+    element.viraoneWidget = new AvatarWidget(element);
+    element.viraoneWidget.load();
+    return element.viraoneWidget;
+  }
+
+  function mountAll() {
+    var elements = document.querySelectorAll("#viraone-avatar, [data-viraone-avatar]");
+    for (var position = 0; position < elements.length; position++) {
+      mount(elements[position]);
+    }
+  }
+
+  window.ViraOneAvatar = { mount: mount };
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", mountAll);
+  } else {
+    mountAll();
+  }
+})();
+</script>

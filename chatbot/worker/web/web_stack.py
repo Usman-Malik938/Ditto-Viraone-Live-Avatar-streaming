@@ -33,7 +33,7 @@ class WebStack:
         from worker.handler import VoiceAgentWorker
         sys.argv = [sys.argv[0], "dev", "--log-level", config.VOICE_AGENT_LOG_LEVEL]
         voice_agent_worker = VoiceAgentWorker(stages.listening_stage, stages.reasoning_stage, stages.speaking_stage,
-                                              stages.registry, stages.avatar_stage)
+                                              stages.registry, stages.avatar_stage, stages.session_guard)
         voice_agent_worker.run(on_registered=self.announce_ready)
 
     def announce_ready(self, *registration_details):

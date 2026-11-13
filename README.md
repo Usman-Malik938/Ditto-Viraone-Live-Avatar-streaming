@@ -62,6 +62,9 @@ bash /workspace/Ditto-Viraone-Live-Avatar-streaming/deploy/runpod/set_key.sh OPE
 bash /workspace/Ditto-Viraone-Live-Avatar-streaming/deploy/runpod/set_key.sh ELEVENLABS_API_KEY
 ```
 
+`set_key.sh ELEVENLABS_VOICE_IDS` sets the voice picker's voices: ElevenLabs voice ids, comma-separated, the first one
+the default. The pages show them only as Voice 1, 2, 3.
+
 **Add the portrait:** copy the approved selfie to `chatbot/assets/avatar_portrait.jpg` (git-ignored).
 
 **Start or restart everything:**
@@ -71,6 +74,12 @@ bash /workspace/Ditto-Viraone-Live-Avatar-streaming/deploy/runpod/start.sh
 ```
 
 It prints the test link: `https://<pod-id>-8080.proxy.runpod.net`. The browser asks for `WEB_ACCESS_PASSWORD` from `chatbot/.env` (any user name). Logs are in `/workspace/logs/`.
+
+**SCARD widget:** the client's page embeds [chatbot/web/widget/viraone-avatar-widget.html](chatbot/web/widget/viraone-avatar-widget.html)
+in place of its circular profile picture; see [its README](chatbot/web/widget/README.md). Try it at
+`https://<pod-id>-8080.proxy.runpod.net/widget?access=<WEB_ACCESS_PASSWORD>` (add `&viraone-timing` for the response-time
+panel). The session safeguards (3-minute calls, 30-second silence timeout, calls per visitor per hour, rate limits) are
+set in `chatbot/.env`; the widget README lists them.
 
 If calls don't connect over TCP, switch to the LiveKit Cloud free tier instead: set `LIVEKIT_URL`, `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` in `chatbot/.env` (no code change).
 
