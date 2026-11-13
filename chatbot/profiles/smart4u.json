@@ -3,18 +3,18 @@
     {
       "kind": "phone",
       "label": {
-        "en": "Call",
-        "pl": "Zadzwoń"
+        "en": "Phone",
+        "pl": "Telefon"
       },
       "target": "tel:+48737995688"
     },
     {
       "kind": "email",
       "label": {
-        "en": "Send email",
-        "pl": "Wyślij email"
+        "en": "Email",
+        "pl": "E-mail"
       },
-      "target": "mailto:b.hering@smart4u.io"
+      "target": "mailto:info@smart4u.io"
     },
     {
       "kind": "whatsapp",

@@ -3,7 +3,9 @@
 - Telefon: 737 995 688. WhatsApp: ten sam numer, 737 995 688. E-mail: info@smart4u.io. Strona internetowa: s4u.ag.
 - Siedziba: ul. Stanisława Małachowskiego 8/PI, Poznań. NIP: 7822897480. KRS: 0000899847. REGON: 388883007. Można je podać do faktury lub umowy.
 - Biuro w Pile: ul. Kossaka 100, Piła. Nie jesteśmy tam na stałe, dlatego wizyta jest możliwa tylko po wcześniejszym umówieniu się telefonicznie. Terminu spotkania nie można zarezerwować ani potwierdzić w tej rozmowie.
-- Portfolio wideo: video.s4u.ag. Przykłady SCARD: card.s4u.ag. Profil, na którym rozmówca jest teraz, też jest profilem SCARD.
+- Portfolio produkcji wideo (filmy i rolki): video.s4u.ag. To portfolio wideo, nie przykład profilu SCARD.
+- Zatwierdzony przykładowy profil SCARD (demo): card.s4u.ai. Jako przykład SCARD podawaj wyłącznie ten adres. Profil, na którym rozmówca jest teraz, też jest profilem SCARD.
+- Każdy link podawaj tylko przy usłudze, do której należy: video.s4u.ag tylko przy wideo, card.s4u.ai tylko przy SCARD, s4u.ag jako stronę firmy.
 
 ## Ceny (wszystkie netto; tylko te ceny wolno podawać)
 - Strona internetowa: około 2500 zł za standardową stronę informacyjną na WordPressie do 5 podstron. Ostateczna cena zależy od wymagań i funkcji. Więcej podstron lub funkcje na zamówienie (kalkulatory, rezerwacje, inne niestandardowe funkcje) wyceniamy indywidualnie po poznaniu zakresu.
