@@ -27,6 +27,8 @@ from worker.web.text_turn import TextTurn
 ACCESS_COOKIE_NAME = "viraone_access"
 # Pages that use the login cookie and the browser's login box; every other path is API, portrait or the widget.
 CONSOLE_PAGE_PATHS = ("/", "/index.html", "/voice", "/voice.html")
+# All the widget needs, and all its key (WIDGET_ACCESS_KEY) opens.
+WIDGET_PATHS = ("/widget", "/api/settings", "/avatar-portrait", "/api/voice-token")
 # The widget's visitor token: a random id the browser keeps (anything else falls back to the IP address).
 VISITOR_TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9-]{8,64}$")
 ACCESS_IN_ADDRESS_PATTERN = re.compile(r"access=[^&\s\"]*")
@@ -123,11 +125,12 @@ class ChatRequestHandler(BaseHTTPRequestHandler):
             self.send_error(404, "Not found")
 
     def is_authorized(self):
-        """WEB_ACCESS_PASSWORD guards the page; always true when no password is set. Three ways in:
+        """WEB_ACCESS_PASSWORD (the team's) guards everything; always true when no password is set. Ways in:
         - the private link /?access=<password> to the console or /voice: sets a login cookie for a day and redirects
           to the page without the password in the address, so the page and its API calls work without a login box;
-        - ?access=<password> on any other request: the SCARD widget, which runs on another site where our cookie
-          isn't sent, adds it to every request;
+        - ?access=<WIDGET_ACCESS_KEY> on the widget's own requests (WIDGET_PATHS): the SCARD widget, which runs on
+          another site where our cookie isn't sent, adds it to every request. It opens nothing else;
+        - ?access=<password> on any request other than the console pages (the widget run with the team password);
         - HTTP basic auth (any user name), which the browser asks for when there is no cookie."""
         self.signed_in_as_team = True
         if not config.WEB_ACCESS_PASSWORD:
@@ -136,6 +139,10 @@ class ChatRequestHandler(BaseHTTPRequestHandler):
             return True
         request_url = urlparse(self.path)
         link_password = parse_qs(request_url.query).get("access", [""])[0]
+        if (link_password and request_url.path in WIDGET_PATHS
+                and self.matches_password(link_password, config.WIDGET_ACCESS_KEY)):
+            self.signed_in_as_team = False
+            return True
         if link_password and self.matches_password(link_password) and request_url.path not in CONSOLE_PAGE_PATHS:
             self.signed_in_as_team = False
             return True
@@ -213,13 +220,15 @@ class ChatRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(page)
 
-    def matches_password(self, candidate):
-        """candidate: text or a cookie morsel; compared in constant time."""
-        if candidate is None:
+    def matches_password(self, candidate, secret=None):
+        """candidate: text or a cookie morsel; compared in constant time with secret (default: the team password)."""
+        if secret is None:
+            secret = config.WEB_ACCESS_PASSWORD
+        if candidate is None or not secret:
             return False
         if hasattr(candidate, "value"):
             candidate = candidate.value
-        return hmac.compare_digest(candidate.encode("utf-8"), config.WEB_ACCESS_PASSWORD.encode("utf-8"))
+        return hmac.compare_digest(candidate.encode("utf-8"), secret.encode("utf-8"))
 
     def stream_turn(self, session_id, language_code, model_key, message):
         model_choice = config.find_language_model_choice(model_key)

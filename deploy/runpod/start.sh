@@ -23,6 +23,16 @@ env_value() { grep -E "^$1=" .env | tail -n 1 | cut -d= -f2- || true; }
 [ -f .env ] || { echo "no .env: run deploy/runpod/setup.sh first"; exit 1; }
 [ -f "$(env_value AVATAR_PORTRAIT_PATH)" ] || echo "WARNING: no portrait at $(env_value AVATAR_PORTRAIT_PATH): calls will be voice only."
 [ -n "$(env_value OPENAI_API_KEY)$(env_value GROQ_API_KEY)" ] || echo "WARNING: no OPENAI_API_KEY yet: bash $ROOT/deploy/runpod/set_key.sh OPENAI_API_KEY"
+if [ -z "$(env_value WIDGET_ACCESS_KEY)" ]; then
+  # The widget's own key, separate from the console password (see WIDGET_ACCESS_KEY in the .env template).
+  WIDGET_KEY_NEW="$(python3 -c 'import secrets; print(secrets.token_urlsafe(12))')"
+  if grep -qE "^WIDGET_ACCESS_KEY=" .env; then
+    sed -i "s|^WIDGET_ACCESS_KEY=.*|WIDGET_ACCESS_KEY=$WIDGET_KEY_NEW|" .env
+  else
+    printf '\nWIDGET_ACCESS_KEY=%s\n' "$WIDGET_KEY_NEW" >> .env
+  fi
+  echo "generated a WIDGET_ACCESS_KEY for the SCARD widget"
+fi
 [ -n "$(env_value ELEVENLABS_API_KEY)" ] || echo "WARNING: no ELEVENLABS_API_KEY yet (no voice, no avatar): bash $ROOT/deploy/runpod/set_key.sh ELEVENLABS_API_KEY"
 
 echo "== stopping a previous run"
@@ -96,7 +106,10 @@ cp tools/livekit/livekit-server.log "$LOGS/livekit.log" 2>/dev/null || true
 
 echo
 echo "READY"
-echo "  test console : https://$POD_ID-8080.proxy.runpod.net"
-echo "  voice page   : https://$POD_ID-8080.proxy.runpod.net/voice"
-echo "  password     : the WEB_ACCESS_PASSWORD in $REPO/.env  (grep WEB_ACCESS_PASSWORD $REPO/.env), any user name"
+echo "  YOUR test console (private, don't share):"
+echo "    https://$POD_ID-8080.proxy.runpod.net/?access=$(env_value WEB_ACCESS_PASSWORD)"
+echo "  SCARD widget demo (this one you can share with the client):"
+echo "    https://$POD_ID-8080.proxy.runpod.net/widget?access=$(env_value WIDGET_ACCESS_KEY)"
+echo "    add &viraone-timing for the response-time panel"
+echo "  widget snippet settings: data-server=\"https://$POD_ID-8080.proxy.runpod.net\" data-key=\"$(env_value WIDGET_ACCESS_KEY)\""
 echo "  logs         : tail -f $LOGS/chatbot.log   ($LOGS/ditto.log, $REPO/tools/livekit/livekit-server.log)"

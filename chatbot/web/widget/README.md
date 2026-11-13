@@ -24,7 +24,7 @@ All the AI runs on the avatar server (the RunPod GPU pod). The widget only shows
 | Attribute | Value |
 |---|---|
 | `data-server` | The avatar server's HTTPS address, for example `https://<pod-id>-8080.proxy.runpod.net` |
-| `data-key` | The server's access key (`WEB_ACCESS_PASSWORD` in its `.env`) |
+| `data-key` | The widget's key (`WIDGET_ACCESS_KEY` in the server's `.env`; `start.sh` prints it) |
 | `data-language` | `pl` (default) or `en` |
 | `data-size` | The circle's diameter: the old profile picture's size, for example `160px`, or `100%` to fill its box. Default `220px`. |
 | `data-layout` | `circle` (default): only the circle with its two badges, a drop-in for the profile picture. `full`: the circle with a Talk button, a voice list and a status line below it. |
@@ -105,8 +105,8 @@ The visitor token is a random id the widget keeps in the browser's storage. When
 ## Things to know
 
 - **HTTPS is required:** browsers allow the microphone only on HTTPS pages, both the SCARD page and the avatar server.
-- **The access key is visible in the page source.** For this PoC it keeps casual visitors from using the server's OpenAI and ElevenLabs credits; together with the limits above, this is baseline protection, not production-grade anti-abuse. Change the key in the server's `.env` after the review.
+- **The widget key is visible in the page source, by design.** It only lets the widget start avatar calls, within the limits above. It doesn't open the server's test console or anything else, and the server's OpenAI and ElevenLabs keys never leave the server. This is baseline protection, not production-grade anti-abuse. Change `WIDGET_ACCESS_KEY` in the server's `.env` after the review, and the old snippet stops working.
 - **The server must be running:** the RunPod pod during the agreed review hours. When it's off, the widget says the avatar is unavailable.
 - **One call at a time on the GPU:** a second visitor during a call waits up to 30 seconds, then gets a voice-only call.
 - **The styles are scoped:** every class starts with `viraone-`, so it doesn't affect the SCARD page's own styles. To change colours, override the `--viraone-*` variables on `.viraone-widget`.
-- **Try it without SCARD:** open `https://<pod-id>-8080.proxy.runpod.net/widget?access=<access key>` to see the same snippet on a page of its own. Add `&viraone-timing` for the timing panel.
+- **Try it without SCARD:** open `https://<pod-id>-8080.proxy.runpod.net/widget?access=<widget key>` to see the same snippet on a page of its own. Add `&viraone-timing` for the timing panel.

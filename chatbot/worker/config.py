@@ -383,6 +383,10 @@ WEB_ACCESS_PASSWORD = os.getenv("WEB_ACCESS_PASSWORD", "")
 # The SCARD widget: the HTML snippet his developer pastes into the SCARD page, and the sites allowed to use this server
 # from the browser (comma-separated origins such as https://scard.example.com; "*" = any site).
 WIDGET_SNIPPET_PATH = PROJECT_ROOT / "web" / "widget" / "viraone-avatar-widget.html"
+# The key in the widget's code, visible to anyone who views the SCARD page's source. It only lets the widget start avatar
+# calls (WIDGET_PATHS in chat_server.py): the console pages and typed chat need WEB_ACCESS_PASSWORD. Empty = the same as
+# WEB_ACCESS_PASSWORD.
+WIDGET_ACCESS_KEY = os.getenv("WIDGET_ACCESS_KEY") or WEB_ACCESS_PASSWORD
 WIDGET_ALLOWED_ORIGINS = [origin.strip().rstrip("/") for origin in (os.getenv("WIDGET_ALLOWED_ORIGINS") or "*").split(",") if origin.strip()]
 
 # Session safeguards (PoC agreement, section 3). 0 turns a limit off. Kept in memory: a server restart resets the counts.

@@ -55,7 +55,14 @@ cd /workspace && git clone https://github.com/Usman-Malik938/Ditto-Viraone-Live-
 bash /workspace/Ditto-Viraone-Live-Avatar-streaming/deploy/runpod/setup.sh
 ```
 
-**Add your keys** (the input is hidden; the keys go to `chatbot/.env`):
+**Add your keys and the portrait from your own computer** (one command; the keys are asked for only once and kept in
+`~/.viraone/pod-keys.env` on your computer, so a new pod never needs them typed again):
+
+```
+bash deploy/runpod/push_private.sh <pod-id>
+```
+
+Or type them on the pod (the input is hidden; the keys go to `chatbot/.env`):
 
 ```
 bash /workspace/Ditto-Viraone-Live-Avatar-streaming/deploy/runpod/set_key.sh OPENAI_API_KEY
@@ -65,7 +72,7 @@ bash /workspace/Ditto-Viraone-Live-Avatar-streaming/deploy/runpod/set_key.sh ELE
 `set_key.sh ELEVENLABS_VOICE_IDS` sets the voice picker's voices: ElevenLabs voice ids, comma-separated, the first one
 the default. The pages show them only as Voice 1, 2, 3.
 
-**Add the portrait:** copy the approved selfie to `chatbot/assets/avatar_portrait.jpg` (git-ignored).
+**The portrait** (`chatbot/assets/avatar_portrait.jpg`, git-ignored) is copied by `push_private.sh`; or copy the approved selfie there yourself.
 
 **Start or restart everything:**
 
@@ -73,11 +80,15 @@ the default. The pages show them only as Voice 1, 2, 3.
 bash /workspace/Ditto-Viraone-Live-Avatar-streaming/deploy/runpod/start.sh
 ```
 
-It prints the test link: `https://<pod-id>-8080.proxy.runpod.net`. The browser asks for `WEB_ACCESS_PASSWORD` from `chatbot/.env` (any user name). Logs are in `/workspace/logs/`.
+It prints two links:
+- your private test console, `https://<pod-id>-8080.proxy.runpod.net/?access=<WEB_ACCESS_PASSWORD>`;
+- the shareable widget demo, `/widget?access=<WIDGET_ACCESS_KEY>`.
+
+The widget key opens only the widget's own requests, never the console. Logs are in `/workspace/logs/`.
 
 **SCARD widget:** the client's page embeds [chatbot/web/widget/viraone-avatar-widget.html](chatbot/web/widget/viraone-avatar-widget.html)
 in place of its circular profile picture; see [its README](chatbot/web/widget/README.md). Try it at
-`https://<pod-id>-8080.proxy.runpod.net/widget?access=<WEB_ACCESS_PASSWORD>` (add `&viraone-timing` for the response-time
+`https://<pod-id>-8080.proxy.runpod.net/widget?access=<WIDGET_ACCESS_KEY>` (add `&viraone-timing` for the response-time
 panel). The session safeguards (3-minute calls, 30-second silence timeout, calls per visitor per hour, rate limits) are
 set in `chatbot/.env`; the widget README lists them.
 
