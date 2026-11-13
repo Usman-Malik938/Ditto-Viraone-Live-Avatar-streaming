@@ -34,7 +34,7 @@ echo "== 3/6 LiveKit server $LIVEKIT_VERSION (Linux)"
 mkdir -p "$CHATBOT/tools/livekit"
 if [ ! -x "$CHATBOT/tools/livekit/livekit-server" ]; then
   curl -sL "https://github.com/livekit/livekit/releases/download/v$LIVEKIT_VERSION/livekit_${LIVEKIT_VERSION}_linux_amd64.tar.gz" \
-    | tar -xz -C "$CHATBOT/tools/livekit" livekit-server
+    | tar -xz --no-same-owner -C "$CHATBOT/tools/livekit" livekit-server
 fi
 "$CHATBOT/tools/livekit/livekit-server" --version
 
