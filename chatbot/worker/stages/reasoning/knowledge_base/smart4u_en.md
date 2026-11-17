@@ -64,7 +64,7 @@ We focus on measurable results, but we do not guarantee specific search rankings
 
 ### Video production and AI videos
 > Do you make videos? Can you make a video from photos? Reels for Instagram? YouTube video? Drone filming? Can you come to my city to film?
-We produce traditional videos from footage (camera, gimbal, drone), advertising reels, animations and AI-generated videos. The customer can send just a few photos and we can create a video from them without a separate shoot, including a horizontal video longer than a minute, depending on the project. Depending on the project, the team develops the concept, animation and edit. We make vertical 9:16 videos (Reels, Shorts, TikTok) and horizontal 16:9 videos (YouTube, websites). Videos range from about 20 seconds to over a minute, depending on the goal. We can also film for customers in other cities, arranged individually.
+We produce traditional videos from footage (camera, drone), advertising reels, animations and AI-generated videos. The customer can send just a few photos and we can create a video from them without a separate shoot, including a horizontal video longer than a minute, depending on the project. Depending on the project, the team develops the concept, animation and edit. We make vertical 9:16 videos (Reels, Shorts, TikTok) and horizontal 16:9 videos (YouTube, websites). Videos range from about 20 seconds to over a minute, depending on the goal. We can also film for customers in other cities, arranged individually.
 
 ## SCARD
 

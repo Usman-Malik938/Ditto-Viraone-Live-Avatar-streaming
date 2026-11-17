@@ -1,3 +1,4 @@
+import logging
 import time
 
 import openai
@@ -5,6 +6,8 @@ import openai
 from worker import config
 from worker.stages.reasoning.reply_tags import ReplyTagFilter
 
+
+logger = logging.getLogger(__name__)
 
 class ReplyResult:
     """fixed_message_kind is 'decline' or None (a fully generated reply)."""
@@ -41,6 +44,20 @@ class ConversationSession:
                                            self.model_choice)
         session_copy.history = list(history)
         return session_copy
+
+    def prewarm(self):
+        """Run while the greeting plays, so the first answer doesn't pay for setup: opens the LLM client's connection
+        (a model list costs no tokens) and runs one knowledge search. Failures only cost the speed-up."""
+        started_at = time.perf_counter()
+        try:
+            self.language_model_client.models.list()
+        except Exception as error:
+            logger.warning("LLM pre-warm failed (the first answer may be slower): %s", error)
+        try:
+            self.knowledge_lookup.search("cena strony", "cena strony")
+        except Exception as error:
+            logger.warning("knowledge search pre-warm failed: %s", error)
+        logger.info("pre-warmed the LLM connection and knowledge search in %.2f s", time.perf_counter() - started_at)
 
     def replace_history(self, history):
         """Records what a voice call actually said, so typing after the call continues from there."""

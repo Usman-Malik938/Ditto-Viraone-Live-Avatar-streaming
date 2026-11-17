@@ -49,8 +49,11 @@ REPLY_DETAILS_TOPIC = "viraone.reply-details"
 
 # Voice agent turn-taking (LiveKit). VAD interruption mode runs locally; the "adaptive" mode needs LiveKit Cloud.
 INTERRUPTION_MODE = "vad"
-# Speech shorter than this while the agent talks doesn't interrupt it.
-MIN_INTERRUPTION_SECONDS = 0.3
+# Speech shorter than this while the agent talks doesn't interrupt it. 0.3 s let a cough, a "mhm", background noise or
+# the avatar's own voice from the speakers cut answers off mid-sentence (day-1 testing), so a real phrase is needed.
+MIN_INTERRUPTION_SECONDS = float(os.getenv("MIN_INTERRUPTION_SECONDS") or "0.8")
+# ...and the speech recognizer must have heard at least this many words, so noise and echo never cut an answer.
+MIN_INTERRUPTION_WORDS = int(os.getenv("MIN_INTERRUPTION_WORDS") or "1")
 # The longest the turn detector waits when unsure. The shortest wait is per language (LanguageSettings).
 MAX_END_OF_TURN_DELAY_SECONDS = 3.0
 # A sound that interrupts the agent but brings no words within this many seconds is a false alarm: the agent resumes.
@@ -369,6 +372,8 @@ AVATAR_BUSY_WAIT_SECONDS = 30
 # An answer counts as played this long after its expected end even if its last frame never arrives,
 # so a lost frame can't leave the agent waiting forever.
 AVATAR_ANSWER_END_GRACE_SECONDS = 5.0
+# Silence added after each answer's last word (rounded up to a whole frame), so the final syllable is never clipped.
+AVATAR_ANSWER_TAIL_SECONDS = 0.2
 
 # Test console web page (text chat + retrieval and timing view)
 WEB_SERVER_HOST = os.getenv("WEB_SERVER_HOST", "127.0.0.1")
@@ -398,7 +403,7 @@ SESSION_INACTIVITY_SECONDS = int(os.getenv("SESSION_INACTIVITY_SECONDS") or "30"
 # call per visitor token (a new call ends the previous one), and at most this many new calls per hour.
 SESSIONS_PER_VISITOR_PER_HOUR = int(os.getenv("SESSIONS_PER_VISITOR_PER_HOUR") or "3")
 # Per IP address, so a visitor can't get around the hourly limit by clearing the browser's visitor token.
-SESSIONS_PER_IP_PER_HOUR = int(os.getenv("SESSIONS_PER_IP_PER_HOUR") or "10")
+SESSIONS_PER_IP_PER_HOUR = int(os.getenv("SESSIONS_PER_IP_PER_HOUR") or "30")
 # Every request to this server, per IP address (also slows down guessing the access key).
 RATE_LIMIT_REQUESTS_PER_MINUTE = int(os.getenv("RATE_LIMIT_REQUESTS_PER_MINUTE") or "60")
 # The longest the goodbye may play before the room is closed anyway.

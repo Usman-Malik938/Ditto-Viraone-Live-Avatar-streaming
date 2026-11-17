@@ -1,9 +1,14 @@
+import asyncio
+import logging
 import time
 
 from livekit.agents import Agent, llm
 
 from worker.livekit.reply_timeline import ReplyTimeline
+from worker.livekit.spoken_text import SpokenTextRewriter
 
+
+logger = logging.getLogger(__name__)
 
 class KnowledgeVoiceAgent(Agent):
     """The LiveKit agent for one call. LiveKit handles listening, turn-taking, interruptions and speech; the reply text
@@ -32,8 +37,22 @@ class KnowledgeVoiceAgent(Agent):
     async def on_enter(self):
         self.session.on("user_state_changed", self.handle_user_state_change)
         self.session.on("close", self.handle_session_close)
+        self.session.on("agent_false_interruption", self.log_false_interruption)
+        self.session.on("agent_state_changed", self.log_interruption)
         if self.speak_greeting:
             self.session.say(self.conversation_session.language.greeting)
+        # While the greeting plays: open the LLM connection and warm the knowledge search for a faster first answer.
+        asyncio.get_running_loop().run_in_executor(None, self.conversation_session.prewarm)
+
+    def log_interruption(self, state_change):
+        """An answer cut short: the agent went from speaking straight to listening because the visitor made a sound."""
+        if state_change.old_state == "speaking" and state_change.new_state == "listening":
+            speech = self.session.current_speech
+            if speech is not None and speech.interrupted:
+                logger.info("answer interrupted by the visitor's microphone")
+
+    def log_false_interruption(self, event):
+        logger.info("false interruption: a sound stopped the answer but no words followed")
 
     def handle_user_state_change(self, state_change):
         if state_change.old_state == "speaking" and state_change.new_state != "speaking":
@@ -70,11 +89,12 @@ class KnowledgeVoiceAgent(Agent):
             yield text
 
     async def tts_node(self, text, model_settings):
-        """LiveKit's own TTS step, wrapped only to time it against the LLM."""
+        """LiveKit's own TTS step, wrapped to time it against the LLM and to rewrite the text for the voice only
+        (numbers, phone numbers, addresses, "Eskard"; see spoken_text.py). The visitor's transcript keeps the original."""
         reply_timeline = self.reply_timeline
         if self.avatar_call is not None:
             self.avatar_call.report_first_face_frame_to(reply_timeline.note_face_frame)
-        text_input = TrackedTextInput(text)
+        text_input = TrackedTextInput(text, SpokenTextRewriter(self.conversation_session.language.code))
         async for audio_frame in Agent.default.tts_node(self, text_input.stream(), model_settings):
             reply_timeline.note_audio(text_input.still_arriving)
             yield audio_frame
@@ -109,13 +129,19 @@ class KnowledgeVoiceAgent(Agent):
 
 
 class TrackedTextInput:
-    """Passes the reply text through to the TTS unchanged and records whether more text is still coming."""
+    """Passes the reply text to the TTS, rewritten for speaking, and records whether more text is still coming."""
 
-    def __init__(self, text):
+    def __init__(self, text, rewriter):
         self.text = text
+        self.rewriter = rewriter
         self.still_arriving = True
 
     async def stream(self):
         async for chunk in self.text:
-            yield chunk
+            spoken = self.rewriter.feed(chunk)
+            if spoken:
+                yield spoken
+        remainder = self.rewriter.flush()
+        if remainder:
+            yield remainder
         self.still_arriving = False

@@ -58,6 +58,8 @@
   transform: scale(var(--viraone-zoom, 1)); transform-origin: 50% 50%;
 }
 .viraone-video { object-fit: cover; object-position: 50% var(--viraone-face-y, 55%); }
+/* Until its first frame plays, the face is laid out but invisible: iOS Safari never starts a video that isn't displayed. */
+.viraone-widget .viraone-video[hidden] { display: block !important; opacity: 0; }
 .viraone-still { background-size: cover; background-position: 50% var(--viraone-face-y, 55%); background-repeat: no-repeat; }
 /* The whole circle is the talk button. */
 .viraone-hit {
@@ -143,6 +145,8 @@
   var NOTE_SECONDS = 6;
   // The time left in a call is shown from this point on.
   var COUNTDOWN_FROM_SECONDS = 30;
+  // Seconds without a new face frame before the widget starts recovering the video.
+  var VIDEO_STALL_CHECKS = 2;
   var TEXT = {
     pl: {
       start: "Porozmawiaj", end: "Zakończ", startAria: "Porozmawiaj z awatarem", endAria: "Zakończ rozmowę",
@@ -406,7 +410,8 @@
         throw new Error(connection.error || "voice-token: status " + response.status);
       }
       var LK = window.LivekitClient;
-      var room = new LK.Room({ adaptiveStream: true });
+      // No adaptiveStream: it stops sending video to a hidden element, and the face stays hidden until its first frame plays.
+      var room = new LK.Room();
       this.room = room;
       room.on(LK.RoomEvent.TrackSubscribed, this.handleTrackSubscribed.bind(this));
       room.on(LK.RoomEvent.TrackUnsubscribed, this.handleTrackUnsubscribed.bind(this));
@@ -455,6 +460,10 @@
   };
 
   AvatarWidget.prototype.reset = function () {
+    this.stopVideoWatchdog();
+    this.videoTrack = null;
+    this.videoPublication = null;
+    this.recoveringVideo = false;
     for (var position = 0; position < this.audioElements.length; position++) {
       this.audioElements[position].remove();
     }
@@ -478,7 +487,7 @@
   };
 
   /* The avatar's audio track carries the voice and its video track the face; they arrive as a synced pair. */
-  AvatarWidget.prototype.handleTrackSubscribed = function (track) {
+  AvatarWidget.prototype.handleTrackSubscribed = function (track, publication) {
     var LK = window.LivekitClient;
     if (track.kind === LK.Track.Kind.Audio) {
       var element = track.attach();
@@ -486,15 +495,96 @@
       this.root.appendChild(element);
       this.audioElements.push(element);
     } else if (track.kind === LK.Track.Kind.Video) {
+      this.videoTrack = track;
+      this.videoPublication = publication;
       track.attach(this.video);
+      this.video.play().catch(function () {});
+      this.startVideoWatchdog();
     }
   };
 
   AvatarWidget.prototype.handleTrackUnsubscribed = function (track) {
     if (track.kind === window.LivekitClient.Track.Kind.Video) {
       track.detach(this.video);
+      if (this.recoveringVideo) {
+        return;  // the watchdog is re-subscribing: keep the last frame on screen instead of flashing the photo
+      }
+      this.videoTrack = null;
       this.video.hidden = true;
       this.still.hidden = false;
+    }
+  };
+
+  /* The face is a continuous 25 fps stream for the whole call. If the browser stops showing new frames (lost packets,
+     a stuck decoder, a tab that was in the background), recover without ending the call: play again, then re-attach
+     the stream, then re-subscribe to it, each after another stalled period. */
+  AvatarWidget.prototype.startVideoWatchdog = function () {
+    this.stopVideoWatchdog();
+    var self = this;
+    var lastProgress = -1;
+    var stalledChecks = 0;
+    var flowingChecks = 0;
+    var recoveryStep = 0;
+    this.videoWatchdog = window.setInterval(function () {
+      if (!self.room || !self.videoTrack || self.avatarBusy || document.hidden) {
+        stalledChecks = 0;
+        return;
+      }
+      var progress = self.videoProgress();
+      if (progress !== lastProgress) {
+        lastProgress = progress;
+        stalledChecks = 0;
+        // Re-attaching resets the frame counter once; only frames on two checks in a row count as recovered.
+        flowingChecks += 1;
+        if (flowingChecks >= 2) {
+          recoveryStep = 0;
+        }
+        return;
+      }
+      flowingChecks = 0;
+      stalledChecks += 1;
+      if (stalledChecks < VIDEO_STALL_CHECKS) {
+        return;
+      }
+      stalledChecks = 0;
+      recoveryStep = recoveryStep % 3 + 1;
+      self.recoverVideo(recoveryStep);
+    }, 1000);
+  };
+
+  AvatarWidget.prototype.stopVideoWatchdog = function () {
+    window.clearInterval(this.videoWatchdog);
+    this.videoWatchdog = null;
+  };
+
+  AvatarWidget.prototype.videoProgress = function () {
+    var video = this.video;
+    if (typeof video.getVideoPlaybackQuality === "function") {
+      var quality = video.getVideoPlaybackQuality();
+      if (quality && quality.totalVideoFrames) {
+        return quality.totalVideoFrames;
+      }
+    }
+    return video.currentTime;
+  };
+
+  AvatarWidget.prototype.recoverVideo = function (step) {
+    var track = this.videoTrack;
+    var publication = this.videoPublication;
+    console.warn("ViraOne avatar: the face stopped updating, recovering (step " + step + ")");
+    this.video.play().catch(function () {});
+    if (step === 2 && track) {
+      track.detach(this.video);
+      track.attach(this.video);
+      this.video.play().catch(function () {});
+    } else if (step === 3 && publication && typeof publication.setSubscribed === "function") {
+      var self = this;
+      this.recoveringVideo = true;
+      publication.setSubscribed(false);
+      window.setTimeout(function () {
+        publication.setSubscribed(true);
+        window.setTimeout(function () { self.recoveringVideo = false; }, 3000);
+      }, 300);
     }
   };
 
@@ -631,13 +721,15 @@
   };
 
   AvatarWidget.prototype.render = function () {
-    var text = this.noteText || this.stateText;
+    // A voice-only call (another call has the avatar) says so for the whole call, so it's never mistaken for a freeze.
+    var voiceOnly = Boolean(this.room && this.avatarBusy);
+    var text = this.noteText || (voiceOnly ? this.text.avatarBusy : this.stateText);
     if (this.remainingText) {
       text = this.layout === "circle" && !this.noteText ? this.remainingText : text + " · " + this.remainingText;
     }
     this.status.textContent = text;
     this.note.dataset.error = String(this.noteIsError);
-    var showsSomething = Boolean(this.noteText || this.remainingText) || !this.soundButton.hidden;
+    var showsSomething = Boolean(this.noteText || this.remainingText || voiceOnly) || !this.soundButton.hidden;
     this.note.dataset.quiet = String(this.layout === "circle" && !showsSomething);
   };
 

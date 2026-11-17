@@ -70,6 +70,7 @@ class ListeningStage:
             "interruption": {
                 "mode": config.INTERRUPTION_MODE,
                 "min_duration": config.MIN_INTERRUPTION_SECONDS,
+                "min_words": config.MIN_INTERRUPTION_WORDS,
                 "false_interruption_timeout": config.FALSE_INTERRUPTION_TIMEOUT_SECONDS,
                 "resume_false_interruption": config.RESUME_AFTER_FALSE_INTERRUPTION,
             },

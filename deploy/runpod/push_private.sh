@@ -2,7 +2,7 @@
 # Run on YOUR computer (not on the pod), once setup.sh has finished on the pod:
 #   bash deploy/runpod/push_private.sh <pod-id>
 # Copies the private things git doesn't carry to the pod, so you never type them on the pod:
-#   - your keys (OPENAI_API_KEY, ELEVENLABS_API_KEY, ELEVENLABS_VOICE_IDS) into the pod's chatbot/.env;
+#   - your keys (OPENAI_API_KEY, ELEVENLABS_API_KEY, ELEVENLABS_VOICE_IDS, and the SCARD widget key, made once) into the pod's chatbot/.env;
 #   - the approved portrait, chatbot/assets/avatar_portrait.jpg.
 # The keys are kept on this computer in ~/.viraone/pod-keys.env (outside the repo, readable only by you). The first run
 # asks for any key that file doesn't have yet (hidden input); later runs, for any new pod, ask nothing.
@@ -55,6 +55,12 @@ for name in "${KEY_NAMES[@]}"; do
     store_value "$name" "$value"
   fi
 done
+# The SCARD widget's key is made once and kept here, so every new pod gets the same key and the SCARD page's data-key
+# never changes (only data-server, the pod's address, does).
+if [ -z "$(stored_value WIDGET_ACCESS_KEY)" ]; then
+  store_value WIDGET_ACCESS_KEY "$(python3 -c 'import secrets; print(secrets.token_urlsafe(18))')"
+fi
+KEY_NAMES+=(WIDGET_ACCESS_KEY)
 
 echo "Finding the pod's SSH address..."
 read -r SSH_HOST SSH_PORT < <("$RUNPODCTL" pod get "$POD_ID" | python3 -c '

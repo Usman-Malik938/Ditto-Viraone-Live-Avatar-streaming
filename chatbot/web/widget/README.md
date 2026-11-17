@@ -114,7 +114,7 @@ The server enforces these. They are set in its `.env` without code changes, and 
 | `SESSION_INACTIVITY_SECONDS` | 30 | A call ends after 30 seconds in which nobody speaks. |
 | `SESSIONS_PER_VISITOR_PER_HOUR` | 3 | Calls per visitor per hour. Only calls that actually connected count. |
 | One active call per visitor | always | A new call from the same visitor (for example a second tab) ends the previous one. |
-| `SESSIONS_PER_IP_PER_HOUR` | 10 | Call attempts per IP address per hour, a backstop for a visitor who clears the browser's storage. |
+| `SESSIONS_PER_IP_PER_HOUR` | 30 | Call attempts per IP address per hour, a backstop for a visitor who clears the browser's storage. An office or home network shares one address, so it is higher than the per-visitor limit. |
 | `RATE_LIMIT_REQUESTS_PER_MINUTE` | 60 | Requests of any kind per IP address per minute. |
 
 The visitor token is a random id the widget keeps in the browser's storage. When a call ends, the server closes it completely, so speech-to-text, the language model, ElevenLabs and the avatar stop for that call. The goodbye lines are in `profiles/smart4u.json` under `session_messages`.
@@ -124,6 +124,7 @@ The visitor token is a random id the widget keeps in the browser's storage. When
 - **HTTPS is required:** browsers allow the microphone only on HTTPS pages, both the SCARD page and the avatar server.
 - **The widget key is visible in the page source, by design.** It only lets the widget start avatar calls, within the limits above. It doesn't open the server's test console or anything else, and the server's OpenAI and ElevenLabs keys never leave the server. This is baseline protection, not production-grade anti-abuse. Change `WIDGET_ACCESS_KEY` in the server's `.env` after the review, and the old snippet stops working.
 - **The server must be running:** the RunPod pod during the agreed review hours. When it's off, the widget says the avatar is unavailable.
-- **One call at a time on the GPU:** a second visitor during a call waits up to 30 seconds, then gets a voice-only call.
+- **One call at a time on the GPU:** a second visitor during a call waits up to 30 seconds, then gets a voice-only call. The widget then says so under the circle for the whole call, so a still photo is never mistaken for a frozen face.
+- **The face recovers by itself:** if the browser stops showing new frames during a call (lost packets, a stuck decoder), the widget restarts the video within a few seconds, without ending the call or reloading the page.
 - **The styles are scoped:** every class starts with `viraone-`, so it doesn't affect the SCARD page's own styles. To change colours, override the `--viraone-*` variables on `.viraone-widget`.
 - **Try it without SCARD:** open `https://<pod-id>-8080.proxy.runpod.net/widget?access=<widget key>` to see the same snippet on a page of its own. Add `&viraone-timing` for the timing panel.

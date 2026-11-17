@@ -53,7 +53,12 @@ class VoiceAgentWorker:
     async def start_conversation(self, job_context):
         await asyncio.to_thread(self.load_shared_models)
         await job_context.connect()
-        call_settings = await self.read_call_settings(job_context)
+        try:
+            call_settings = await self.read_call_settings(job_context)
+        except RuntimeError as error:
+            # The visitor left (or reloaded the page) before the agent saw them join: nothing to talk to.
+            logging.getLogger(__name__).info("visitor left before the call started (%s)", error)
+            return
         language = call_settings.language
 
         # Without a voice there is nothing for the face to say, so the avatar joins only when ElevenLabs speaks.

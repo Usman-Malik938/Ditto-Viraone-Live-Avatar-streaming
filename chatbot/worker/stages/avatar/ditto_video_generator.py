@@ -93,10 +93,24 @@ class DittoVideoGenerator(VideoGenerator):
     async def end_answer(self):
         if self.sending_answer is None:
             return
+        await self.send_answer_tail(self.sending_answer)
         self.sending_answer.end_sent_at = time.perf_counter()
         await self.connection.end_answer()
         self.sending_answer = None
         self.sending_answer_number += 1
+
+    async def send_answer_tail(self, answer):
+        """A short silence after the last word, ending on a whole video frame. An answer counts as played once all
+        but its last frame came back, and Ditto labels a frame by its first sample, so without this the final
+        syllable could ride on a frame that is dropped. The silence is what gets cut instead, never speech."""
+        samples_per_frame = config.AVATAR_AUDIO_SAMPLES_PER_FRAME
+        tail_samples = int(config.AVATAR_SAMPLE_RATE * config.AVATAR_ANSWER_TAIL_SECONDS)
+        total_samples = answer.sent_samples + tail_samples
+        tail_samples += (-total_samples) % samples_per_frame
+        if tail_samples <= 0:
+            return
+        answer.sent_samples += tail_samples
+        await self.connection.send_speech(bytes(2 * tail_samples))
 
     async def clear_buffer(self):
         """The user interrupted: Ditto drops the queued voice and silences what it hasn't sent yet; frames already

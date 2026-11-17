@@ -64,7 +64,7 @@ Skupiamy się na mierzalnych wynikach, ale nie gwarantujemy konkretnych pozycji 
 
 ### Produkcja wideo i filmy AI
 > Robicie filmy? Czy zrobicie film ze zdjęć? Rolki na Instagram? Film na YouTube? Nagrania dronem? Czy przyjedziecie nagrywać do mojego miasta?
-Przygotowujemy tradycyjne filmy z nagrań (kamera, gimbal, dron), rolki reklamowe, animacje oraz filmy tworzone z AI. Klient może przesłać zaledwie kilka zdjęć, a my przygotujemy na ich podstawie materiał filmowy, bez organizowania sesji, również film poziomy dłuższy niż minuta, zależnie od projektu. W zależności od projektu zespół przygotowuje koncepcję, animację i montaż. Robimy filmy w formacie pionowym 9:16 (Reels, Shorts, TikTok) i poziomym 16:9 (YouTube, strony WWW). Materiały mają od około 20 sekund do ponad minuty, a długość zależy od celu. Możemy też nagrywać u klientów w innych miastach, po indywidualnym ustaleniu.
+Przygotowujemy tradycyjne filmy z nagrań (kamera, dron), rolki reklamowe, animacje oraz filmy tworzone z AI. Klient może przesłać zaledwie kilka zdjęć, a my przygotujemy na ich podstawie materiał filmowy, bez organizowania sesji, również film poziomy dłuższy niż minuta, zależnie od projektu. W zależności od projektu zespół przygotowuje koncepcję, animację i montaż. Robimy filmy w formacie pionowym 9:16 (Reels, Shorts, TikTok) i poziomym 16:9 (YouTube, strony WWW). Materiały mają od około 20 sekund do ponad minuty, a długość zależy od celu. Możemy też nagrywać u klientów w innych miastach, po indywidualnym ustaleniu.
 
 ## SCARD
 
