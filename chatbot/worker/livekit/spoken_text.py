@@ -33,7 +33,9 @@ LETTER_NAMES = {"a": "a", "b": "be", "c": "ce", "d": "de", "e": "e", "f": "ef", 
                 "j": "jot", "k": "ka", "l": "el", "m": "em", "n": "en", "o": "o", "p": "pe", "q": "ku", "r": "er",
                 "s": "es", "t": "te", "u": "u", "v": "fał", "w": "wu", "x": "iks", "y": "igrek", "z": "zet"}
 # Domain endings read as a word rather than letter by letter.
-SPOKEN_TOP_LEVEL_DOMAINS = {"com": "kom", "net": "net", "org": "org", "info": "info", "online": "onlajn"}
+SPOKEN_TOP_LEVEL_DOMAINS = {"ag": "agie", "com": "kom", "net": "net", "org": "org", "info": "info", "online": "onlajn"}
+# Address parts with a fixed Polish reading (the client asked for "wideo kropka es cztery u kropka agie").
+SPOKEN_LABELS = {"www": "wu wu wu", "scard": "eskard", "video": "wideo"}
 TOP_LEVEL_DOMAINS = r"(?:pl|com|ag|ai|io|eu|net|org|de|uk|app|dev|info|biz|co|me|online|store|shop|tv)"
 
 # Words after which Polish puts a number (and the noun after it) in the genitive.
@@ -49,6 +51,19 @@ GENITIVE_PLURAL = {"miesiące": "miesięcy", "miesiąca": "miesięcy", "miesiąc
 FEMININE_NOUN_STARTS = ("stron", "godzin", "osob", "osób", "wersj", "rolk", "rolek", "kampani", "minut", "sekund",
                         "podstron", "grafik", "reklam", "opcj", "wizytówk", "karty", "kart", "lekcj", "sesj", "zmian")
 
+# Number as the first part of a compound adjective: "30-sekundowa" -> "trzydziestosekundowa".
+UNIT_PREFIXES = ["", "jedno", "dwu", "trzy", "cztero", "pięcio", "sześcio", "siedmio", "ośmio", "dziewięcio"]
+TEEN_PREFIXES = ["dziesięcio", "jedenasto", "dwunasto", "trzynasto", "czternasto", "piętnasto", "szesnasto",
+                 "siedemnasto", "osiemnasto", "dziewiętnasto"]
+TENS_PREFIXES = ["", "", "dwudziesto", "trzydziesto", "czterdziesto", "pięćdziesięcio", "sześćdziesięcio",
+                 "siedemdziesięcio", "osiemdziesięcio", "dziewięćdziesięcio"]
+# Abbreviations end in a full stop, which the voice treats as the end of a sentence: a pause and a fresh intonation in
+# the middle of what is one sentence. They are written out instead.
+ABBREVIATIONS = [(r"\bnp\.", "na przykład"), (r"\bm\.in\.", "między innymi"), (r"\bitd\.", "i tak dalej"),
+                 (r"\bitp\.", "i tym podobne"), (r"\btj\.", "to jest"), (r"\btzw\.", "tak zwany"),
+                 (r"\btel\.", "telefon"), (r"\bul\.", "ulica"), (r"\bgodz\.", "godzina"),
+                 (r"\bok\.(?=\s*\d)", "około"), (r"\bSp\.(?=\s*z\b)", "spółka"),
+                 (r"\bz o\.\s?o\.", "z ograniczoną odpowiedzialnością"), (r"(?<=\d)\s*r\.(?=\s)", " roku")]
 NUMBER = r"\d{1,3}(?:[  ]\d{3})+|\d+"
 # A number that isn't part of a word, a time (17:00), a date (16.11.2026) or a decimal written with a dot.
 STANDALONE = r"(?<![\w.,:/@])(?:{number})(?![\w:]|[.,]\d)"
@@ -134,10 +149,8 @@ def spell_label(label):
 
 def speak_domain_label(label):
     lowered = label.lower()
-    if lowered == "www":
-        return "wu wu wu"
-    if lowered == "scard":
-        return "eskard"
+    if lowered in SPOKEN_LABELS:
+        return SPOKEN_LABELS[lowered]
     if len(lowered) <= 2:
         return spell_label(lowered)
     # Letters and digits mixed ("smart4u", "s4u"): words of 3+ letters stay words, the rest is spelled.
@@ -156,14 +169,14 @@ def speak_address(address):
     spoken_labels = [speak_domain_label(label) for label in labels[:-1]]
     top_level = labels[-1].lower()
     spoken_labels.append(SPOKEN_TOP_LEVEL_DOMAINS.get(top_level) or spell_label(top_level))
-    spoken = " kropka ".join(spoken_labels)
+    spoken = ", kropka, ".join(spoken_labels)
     for segment in [segment for segment in path.split("/") if segment]:
-        spoken += " ukośnik " + segment.replace("-", " ")
+        spoken += ", ukośnik, " + segment.replace("-", " ")
     return spoken
 
 
 def speak_email(match):
-    return f"{match.group(1)} małpa {speak_address(match.group(2))}"
+    return f"{match.group(1)}, małpa, {speak_address(match.group(2))}"
 
 
 def speak_phone(match):
@@ -216,15 +229,61 @@ def speak_plain_number(match):
     return (preposition or "") + spoken + (" " + noun if noun else "")
 
 
-def speak_polish(text):
+def compound_prefix(number):
+    """The number as the first part of a compound word: 30 -> "trzydziesto", 45 -> "czterdziestopięcio"."""
+    if number == 100:
+        return "stu"
+    if 10 <= number <= 19:
+        return TEEN_PREFIXES[number - 10]
+    if 1 <= number <= 99:
+        tens, units = divmod(number, 10)
+        return TENS_PREFIXES[tens] + UNIT_PREFIXES[units]
+    return number_in_words(number) + " "
+
+
+def write_out_abbreviations(text):
+    for pattern, replacement in ABBREVIATIONS:
+        def keep_capital(match, replacement=replacement):
+            if match.group(0)[:1].isupper():
+                return replacement[:1].upper() + replacement[1:]
+            return replacement
+        text = re.sub(pattern, keep_capital, text, flags=re.IGNORECASE)
+    return text
+
+
+def say_twice(spoken, key, said):
+    """Contact details are said once more, with short pauses, so the visitor can note them down. Once per answer."""
+    if said is None or key in said:
+        return spoken
+    said.add(key)
+    return f"{spoken}, powtarzam, {spoken}"
+
+
+def speak_polish(text, said=None):
     """The whole rewrite for one piece of reply text. The order matters: addresses and phone numbers first, so their
-    digits aren't read as amounts."""
-    text = re.sub(r"\b([\w.+-]+)@([\w-]+(?:\.[\w-]+)*\.[a-z]{2,6})\b", speak_email, text, flags=re.IGNORECASE)
+    digits aren't read as amounts. said: contact details already repeated in this answer (None: never repeat)."""
+    def email(match):
+        return say_twice(speak_email(match), match.group(0).lower(), said)
+
+    def address(match):
+        return say_twice(speak_address(match.group(0)), match.group(0).lower().rstrip("/"), said)
+
+    def phone(match):
+        # Company registry numbers (NIP, KRS, REGON) are read digit by digit too, but they aren't contact details.
+        if re.search(r"\b(?:NIP|KRS|REGON)\b\W*$", match.string[max(0, match.start() - 12):match.start()]):
+            return speak_phone(match)
+        return say_twice(speak_phone(match), re.sub(r"\D", "", match.group(0))[-9:], said)
+
+    text = re.sub(r"\b([\w.+-]+)@([\w-]+(?:\.[\w-]+)*\.[a-z]{2,6})\b", email, text, flags=re.IGNORECASE)
     text = re.sub(rf"(?<![@\w])((?:https?://)?(?:[a-z0-9-]+\.)+{TOP_LEVEL_DOMAINS})(/[\w/-]*)?(?![\w])",
-                  lambda match: speak_address(match.group(0)), text, flags=re.IGNORECASE)
-    text = re.sub(r"(?<![\w])(\+\d{2}[  -]?)?(\d{3}[  -]?\d{3}[  -]?\d{3})(?![\w]|[  -]?\d)", speak_phone, text)
-    text = re.sub(r"(?<![\w])(\+\d{2})?(\d{9,11})(?![\w])", speak_phone, text)
-    text = re.sub(r"\bSCARD(?=\b|[a-ząęółśżźćń-])-?", "Eskard", text, flags=re.IGNORECASE)
+                  address, text, flags=re.IGNORECASE)
+    text = re.sub(r"(?<![\w])(\+\d{2}[  -]?)?(\d{3}[  -]?\d{3}[  -]?\d{3})(?![\w]|[  -]?\d)", phone, text)
+    text = re.sub(r"(?<![\w])(\+\d{2})?(\d{9,11})(?![\w])", phone, text)
+    text = re.sub(r"\bS-?CARD(?=\b|[a-ząęółśżźćń-])-?", "Eskard", text, flags=re.IGNORECASE)
+    text = write_out_abbreviations(text)
+    text = re.sub(r"(?<![\w/])24\s*/\s*7(?![\w/])", "dwadzieścia cztery na siedem", text)
+    text = re.sub(r"(?<![\w.,:/])(\d{1,3})-(?=[a-ząęółśżźćń]{3,})",
+                  lambda match: compound_prefix(int(match.group(1))), text, flags=re.IGNORECASE)
     preposition = rf"((?:\b{GENITIVE_TRIGGERS}|\bw)\s+)?"
     text = re.sub(rf"{preposition}(?<![\w.,:/])({NUMBER})\s*[-–—]\s*({NUMBER})(?![\w:]|[.,]\d)(?:\s+({CURRENCY}|[a-ząęółśżźćń]+))?",
                   speak_range, text, flags=re.IGNORECASE)
@@ -242,12 +301,13 @@ class SpokenTextRewriter:
     """Rewrites a streamed reply piece by piece. Text is passed on only up to a point where nothing that follows can
     change it: a number, address or "od"/"do" at the end is held until the next words arrive."""
 
-    HOLD_BACK = re.compile(rf"(?:\S*[\d@/+%]\S*|\S*\.\S+|{GENITIVE_TRIGGERS}|w|ciągu|okolicach|wysokości|scard\S*)",
+    HOLD_BACK = re.compile(rf"(?:\S*[\d@/+%]\S*|\S*\.\S+|{GENITIVE_TRIGGERS}|w|z|sp|ok|nip|krs|regon|ciągu|okolicach|wysokości|s-?card\S*)",
                            re.IGNORECASE)
 
     def __init__(self, language_code):
         self.enabled = language_code == "pl"
         self.buffer = ""
+        self.said_contacts = set()
 
     def feed(self, chunk):
         if not self.enabled:
@@ -255,13 +315,13 @@ class SpokenTextRewriter:
         self.buffer += chunk
         cut = self.safe_cut(self.buffer)
         ready, self.buffer = self.buffer[:cut], self.buffer[cut:]
-        return speak_polish(ready) if ready else ""
+        return speak_polish(ready, self.said_contacts) if ready else ""
 
     def flush(self):
         if not self.enabled:
             return ""
         ready, self.buffer = self.buffer, ""
-        return speak_polish(ready) if ready else ""
+        return speak_polish(ready, self.said_contacts) if ready else ""
 
     def safe_cut(self, text):
         """Index up to which text is final: the last space before a word that is still incomplete or could join a
@@ -281,6 +341,6 @@ class SpokenTextRewriter:
         bare = token.strip(".,;:!?()\"'„”")
         if not bare:
             return False
-        if token.endswith((".", "!", "?")) and not re.search(r"[\d@/]|\.\w", bare) and bare.lower() not in ("ok",):
+        if token.endswith((".", "!", "?")) and not re.search(r"[\d@/]|\.\w", bare) and bare.lower() not in ("ok", "sp"):
             return False
         return bool(self.HOLD_BACK.fullmatch(bare)) or bool(re.fullmatch(r"[-–—]", bare))

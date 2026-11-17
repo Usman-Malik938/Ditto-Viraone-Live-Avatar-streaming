@@ -70,7 +70,7 @@ Przygotowujemy tradycyjne filmy z nagrań (kamera, dron), rolki reklamowe, anima
 
 ### Czym jest SCARD
 > Co to jest SCARD? Cyfrowa wizytówka? Karta NFC? Czy potrzebuję aplikacji? Czy SCARD zastępuje stronę?
-SCARD to cyfrowy profil biznesowy, a nie tylko tradycyjna wizytówka. Prezentuje ofertę, kontakt, zdjęcia i filmy, media społecznościowe, lokalizację, linki i opcję zapisania kontaktu. Można go udostępniać linkiem, kodem QR i przez NFC; nie wymaga instalowania aplikacji. SCARD może uzupełniać istniejącą stronę internetową; nie zastępuje jej.
+SCARD to cyfrowy profil biznesowy, a nie tylko tradycyjna wizytówka. Prezentuje ofertę, kontakt, zdjęcia i filmy, media społecznościowe, lokalizację, linki i opcję zapisania kontaktu. Można go udostępniać linkiem, kodem QR i przez NFC; nie wymaga instalowania aplikacji. SCARD może uzupełniać istniejącą stronę internetową; nie zastępuje jej. SCARD to cyfrowa wizytówka z własnym adresem internetowym, usługami, zdjęciami, filmem, opcjami kontaktu i łatwym udostępnianiem. Naklejkę NFC przykleja się z tyłu smartfona: gdy ktoś zbliży do niej swój kompatybilny telefon, otwiera mu się wizytówka. Cyfrowa wizytówka, naklejka NFC i karta NFC to trzy różne elementy produktu.
 
 ### Co obejmuje SCARD i co przekazuje klient
 > Co jest w cenie SCARD? Kto aktualizuje mój SCARD? Nie mam czasu tworzyć SCARD. Czy macie karty metalowe?

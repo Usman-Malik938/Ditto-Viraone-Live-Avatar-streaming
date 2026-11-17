@@ -70,7 +70,7 @@ We produce traditional videos from footage (camera, drone), advertising reels, a
 
 ### What SCARD is
 > What is SCARD? Digital business card? NFC card? Do I need an app? Does SCARD replace a website?
-SCARD is a digital business profile, not just a traditional business card. It presents services, contact details, photos and videos, social media, location, links and an option to save the contact. It can be shared by link, QR code and NFC, and no app installation is required. SCARD can complement an existing website; it does not replace it.
+SCARD is a digital business profile, not just a traditional business card. It presents services, contact details, photos and videos, social media, location, links and an option to save the contact. It can be shared by link, QR code and NFC, and no app installation is required. SCARD can complement an existing website; it does not replace it. SCARD is a digital business card with its own web address, services, photos, video, contact options and easy sharing. The NFC sticker is attached to the back of a smartphone: when someone brings their compatible phone close to it, the business card opens for them. The digital business card, the NFC sticker and the NFC card are three different elements of the product.
 
 ### What SCARD includes and what the customer provides
 > What is included in SCARD? Who updates my SCARD? I don't have time to create a SCARD. Do you have metal cards?
