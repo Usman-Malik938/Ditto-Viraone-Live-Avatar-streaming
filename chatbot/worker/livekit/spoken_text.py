@@ -183,7 +183,8 @@ def speak_phone(match):
     country_code, digits = match.group(1), re.sub(r"\D", "", match.group(2))
     spoken = digits_one_by_one(digits)
     if country_code:
-        spoken = f"plus {number_in_words(int(re.sub(r'\D', '', country_code)))}, {spoken}"
+        country_number = int(re.sub(r"\D", "", country_code))
+        spoken = f"plus {number_in_words(country_number)}, {spoken}"
     return spoken
 
 
