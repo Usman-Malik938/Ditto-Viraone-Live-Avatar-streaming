@@ -33,13 +33,14 @@ LETTER_NAMES = {"a": "a", "b": "be", "c": "ce", "d": "de", "e": "e", "f": "ef", 
                 "j": "jot", "k": "ka", "l": "el", "m": "em", "n": "en", "o": "o", "p": "pe", "q": "ku", "r": "er",
                 "s": "es", "t": "te", "u": "u", "v": "fał", "w": "wu", "x": "iks", "y": "igrek", "z": "zet"}
 # Domain endings read as a word rather than letter by letter.
-SPOKEN_TOP_LEVEL_DOMAINS = {"ag": "agie", "com": "kom", "net": "net", "org": "org", "info": "info", "online": "onlajn"}
+SPOKEN_TOP_LEVEL_DOMAINS = {"ag": "agie", "ai": "a, i", "com": "kom", "net": "net", "org": "org", "info": "info", "online": "onlajn"}
 # Address parts with a fixed Polish reading (the client asked for "wideo kropka es cztery u kropka agie").
 SPOKEN_LABELS = {"www": "wu wu wu", "scard": "eskard", "video": "wideo"}
 TOP_LEVEL_DOMAINS = r"(?:pl|com|ag|ai|io|eu|net|org|de|uk|app|dev|info|biz|co|me|online|store|shop|tv)"
 
 # Words after which Polish puts a number (and the noun after it) in the genitive.
-GENITIVE_TRIGGERS = r"(?:od|do|około|ok\.|ponad|powyżej|poniżej|blisko|prawie|bez|w ciągu|w okolicach|w wysokości)"
+# "ponad" and "prawie" are NOT here: they take the accusative ("ponad dziesięć lat", "ponad tysiąc stron").
+GENITIVE_TRIGGERS = r"(?:od|do|około|ok\.|powyżej|poniżej|blisko|bez|w ciągu|w okolicach|w wysokości)"
 CURRENCY = r"(?:zł|PLN|złotych|złote|złoty|złotego)"
 # Nouns of time a range is usually about, with their genitive plural.
 GENITIVE_PLURAL = {"miesiące": "miesięcy", "miesiąca": "miesięcy", "miesiąc": "miesięcy", "miesięcy": "miesięcy",
@@ -179,9 +180,17 @@ def speak_email(match):
     return f"{match.group(1)}, małpa, {speak_address(match.group(2))}"
 
 
+def phone_digits(digits):
+    """A 9-digit Polish number in three groups, however it was written: "737 995 688", "737 99 56 88" ->
+    "siedem trzy siedem, dziewięć dziewięć pięć, sześć osiem osiem". Other lengths digit by digit."""
+    if len(digits) == 9:
+        return ", ".join(" ".join(UNITS[int(digit)] for digit in digits[start:start + 3]) for start in (0, 3, 6))
+    return digits_one_by_one(digits)
+
+
 def speak_phone(match):
     country_code, digits = match.group(1), re.sub(r"\D", "", match.group(2))
-    spoken = digits_one_by_one(digits)
+    spoken = phone_digits(digits)
     if country_code:
         country_number = int(re.sub(r"\D", "", country_code))
         spoken = f"plus {number_in_words(country_number)}, {spoken}"
@@ -267,7 +276,12 @@ def speak_polish(text, said=None):
         return say_twice(speak_email(match), match.group(0).lower(), said)
 
     def address(match):
-        return say_twice(speak_address(match.group(0)), match.group(0).lower().rstrip("/"), said)
+        spoken = say_twice(speak_address(match.group(0)), match.group(0).lower().rstrip("/"), said)
+        if re.match(r"(?:https?://)?(?:www\.)?video\.", match.group(0), re.IGNORECASE) and (said is None or "video-v" not in said):
+            if said is not None:
+                said.add("video-v")
+            spoken += ", wideo pisane przez fał"
+        return spoken
 
     def phone(match):
         # Company registry numbers (NIP, KRS, REGON) are read digit by digit too, but they aren't contact details.
@@ -278,7 +292,8 @@ def speak_polish(text, said=None):
     text = re.sub(r"\b([\w.+-]+)@([\w-]+(?:\.[\w-]+)*\.[a-z]{2,6})\b", email, text, flags=re.IGNORECASE)
     text = re.sub(rf"(?<![@\w])((?:https?://)?(?:[a-z0-9-]+\.)+{TOP_LEVEL_DOMAINS})(/[\w/-]*)?(?![\w])",
                   address, text, flags=re.IGNORECASE)
-    text = re.sub(r"(?<![\w])(\+\d{2}[  -]?)?(\d{3}[  -]?\d{3}[  -]?\d{3})(?![\w]|[  -]?\d)", phone, text)
+    # Any 9 digits grouped by spaces or dashes ("737 995 688", "737 99 56 88", "737-99-56-88") is a phone number.
+    text = re.sub(r"(?<![\w])(\+\d{2}[  -]?)?((?:\d[  -]?){8}\d)(?![\w]|[  -]?\d)", phone, text)
     text = re.sub(r"(?<![\w])(\+\d{2})?(\d{9,11})(?![\w])", phone, text)
     text = re.sub(r"\bS-?CARD(?=\b|[a-ząęółśżźćń-])-?", "Eskard", text, flags=re.IGNORECASE)
     text = write_out_abbreviations(text)

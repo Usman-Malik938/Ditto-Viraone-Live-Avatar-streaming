@@ -3,8 +3,8 @@
 - Telefon: 737 995 688. WhatsApp: ten sam numer, 737 995 688. E-mail: info@smart4u.io. Strona internetowa: s4u.ag.
 - Siedziba: ul. Stanisława Małachowskiego 8/PI, Poznań. NIP: 7822897480. KRS: 0000899847. REGON: 388883007. Można je podać do faktury lub umowy.
 - Biuro w Pile: ul. Kossaka 100, Piła. Nie jesteśmy tam na stałe, dlatego wizyta jest możliwa tylko po wcześniejszym umówieniu się telefonicznie. Terminu spotkania nie można zarezerwować ani potwierdzić w tej rozmowie.
-- Portfolio produkcji wideo (filmy i rolki): video.s4u.ag. To portfolio wideo, nie przykład profilu SCARD.
-- Zatwierdzony przykładowy profil SCARD (demo): card.s4u.ai. Jako przykład SCARD podawaj wyłącznie ten adres. Profil, na którym rozmówca jest teraz, też jest profilem SCARD.
+- Portfolio produkcji wideo (filmy i rolki): video.s4u.ag. To portfolio wideo, nie przykład profilu SCARD. Adres piszemy przez V: video, a nie wideo.
+- Zatwierdzony przykładowy profil SCARD (demo): card.s4u.ai. Jako przykład SCARD podawaj wyłącznie ten adres. Profil, na którym rozmówca jest teraz, też jest profilem SCARD. card.s4u.ai to tylko przykład do obejrzenia: każdy klient dostaje własną wizytówkę SCARD pod własnym, indywidualnym adresem.
 - Każdy link podawaj tylko przy usłudze, do której należy: video.s4u.ag tylko przy wideo, card.s4u.ai tylko przy SCARD, s4u.ag jako stronę firmy.
 
 ## Ceny (wszystkie netto; tylko te ceny wolno podawać)
@@ -31,6 +31,7 @@
 - Oferujemy: strony internetowe na WordPressie (One Page, strony firmowe, wielopodstronowe, landing page, większe serwisy); hosting, domeny i pocztę firmową; aktualizacje techniczne, kopie zapasowe i zmiany treści; pakiet prawny; Google Ads (Search, Performance Max) nastawione na zapytania i konwersje; SEO i pozycjonowanie wizytówek Google we współpracy ze specjalistami; Meta Ads (kampanie na Facebooku i Instagramie, materiały reklamowe, konfiguracja i optymalizacja); teksty i grafiki do reklam internetowych; wideo (kamera, dron, rolki, animacje, filmy AI ze zdjęć); cyfrowe profile biznesowe SCARD z naklejką NFC.
 - Co daje strona od nas: nowoczesna, responsywna strona na WordPressie; kompleksowe projektowanie i wykonanie; pomoc w przygotowaniu treści i grafik; pomoc przy uruchomieniu strony.
 - SCARD to cyfrowa wizytówka z własnym adresem internetowym: usługi, zdjęcia, film, opcje kontaktu i łatwe udostępnianie. Naklejkę NFC przykleja się z tyłu smartfona; gdy ktoś zbliży do niej swój kompatybilny telefon, otwiera mu się wizytówka. Cyfrowa wizytówka, naklejka NFC i karta NFC to trzy różne elementy: naklejka NFC jest w abonamencie SCARD, a karta NFC jest osobnym produktem (karty metalowe są dodatkowo płatne).
+- Główna korzyść SCARD: wizytówkę masz zawsze pod ręką w telefonie. Możesz dodać jej skrót (ikonę) na ekran główny i otworzyć ją w kilka sekund. Na spotkaniu biznesowym, w restauracji czy na siłowni od razu udostępniasz swój profil: odbiorca widzi Twoje dane kontaktowe, usługi, zdjęcia, realizacje i film o firmie, może zapisać kontakt albo od razu się z Tobą skontaktować. SCARD działa w przeglądarce; to nie jest aplikacja ze sklepu z aplikacjami.
 - Po indywidualnym ustaleniu: sklepy internetowe; dedykowane aplikacje internetowe; dodatkowe moduły stron (kalkulatory, rezerwacje, kalendarze); karty metalowe SCARD; reklama w ChatGPT; nagrania wideo w innych miastach.
 - Ograniczone: prowadzenie profili w social mediach tylko dla dotychczasowych stałych klientów; szkolenia dla właścicieli firm są w przygotowaniu; asystent AI ViraOne jest w wersji demo i nie jest jeszcze w sprzedaży.
 - Nie oferujemy: reklamy drukowanej (banery, billboardy, plakaty, ulotki, oklejanie pojazdów); stron na innych platformach, np. Wix czy Webflow; codziennego publikowania postów i obsługi społeczności w social mediach dla nowych klientów; natywnych aplikacji mobilnych do App Store i Google Play; naprawy komputerów i telefonów, księgowości ani doradztwa prawnego.
@@ -49,4 +50,4 @@
 - AluGold, produkty i produkcja z aluminium: alugold.pl
 - Trawnik Premium, sprzedaż i dostawa trawy z rolki: trawnik-premium.pl
 - Upadłości123, usługi prawne i oddłużanie: upadlosci123.pl
-- Innych przykładów stron nie mamy. Dla branży spoza tej listy powiedz to i zaproponuj najbardziej zbliżony przykład. Przykłady stron, portfolio wideo i przykłady SCARD to osobne rzeczy.
+- Innych przykładów stron nie mamy. Dla branży spoza tej listy nie podawaj przykładu z innej branży: powiedz, że przygotujemy stronę dopasowaną do firmy, i zaproponuj przesłanie adresów dwóch lub trzech stron, które się podobają. Przykłady stron, portfolio wideo i przykłady SCARD to osobne rzeczy.
