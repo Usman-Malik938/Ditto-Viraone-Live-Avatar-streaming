@@ -51,10 +51,13 @@ REPLY_DETAILS_TOPIC = "viraone.reply-details"
 INTERRUPTION_MODE = "vad"
 # Speech shorter than this while the agent talks doesn't interrupt it. 0.3 s let a cough, a "mhm", background noise or
 # the avatar's own voice from the speakers cut answers off mid-sentence (day-1 testing), so a real phrase is needed.
-MIN_INTERRUPTION_SECONDS = float(os.getenv("MIN_INTERRUPTION_SECONDS") or "0.8")
+# Day-5 testing: fragments of background speech and the avatar's own voice from the speakers still stopped answers, so
+# it takes 1.2 s of speech now.
+MIN_INTERRUPTION_SECONDS = float(os.getenv("MIN_INTERRUPTION_SECONDS") or "1.2")
 # ...and the speech recognizer must have heard at least this many words. 1 wasn't enough: the recognizer turns knocking
-# and tapping into single words ("Dziękuję.", "Serdecznie."), which still cut answers off (day-2 testing).
-MIN_INTERRUPTION_WORDS = int(os.getenv("MIN_INTERRUPTION_WORDS") or "2")
+# and tapping into single words ("Dziękuję.", "Serdecznie."); 2 still let short echoes and background fragments
+# ("Okej.", half a sentence from the room) cut answers off. A deliberate "Stop, poczekaj chwilę" still interrupts.
+MIN_INTERRUPTION_WORDS = int(os.getenv("MIN_INTERRUPTION_WORDS") or "3")
 # The longest the turn detector waits when unsure. The shortest wait is per language (LanguageSettings).
 MAX_END_OF_TURN_DELAY_SECONDS = 3.0
 # A sound that interrupts the agent but brings no words within this many seconds is a false alarm: the agent resumes.
