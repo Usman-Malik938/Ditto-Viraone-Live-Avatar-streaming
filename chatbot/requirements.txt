@@ -1,6 +1,12 @@
 # Reasoning stage (RAG + LLM)
 qdrant-client==1.19.1
 FlagEmbedding==1.4.2
+# FlagEmbedding 1.4.2 breaks with the 2026-11 major releases (transformers 5, datasets 5, sentence-transformers 6):
+# pinned to the versions that work, tested on the pod on 2026-11-21.
+transformers==4.57.6
+datasets==4.8.5
+sentence-transformers==5.7.0
+huggingface_hub==0.36.2
 openai==3.35.1
 python-dotenv==1.2.4
 
