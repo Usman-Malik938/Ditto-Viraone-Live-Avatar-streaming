@@ -72,10 +72,13 @@ class VoiceAgentWorker:
             stt=self.listening_stage.build_live_speech_to_text(language),
             llm=self.reasoning_stage.build_live_language_model(call_settings.model_choice),
             tts=text_to_speech,
-            turn_handling=self.listening_stage.build_turn_handling(language),
+            turn_handling=self.listening_stage.build_turn_handling(language, call_settings.speakerphone_safe()),
             # "away" after this long with nobody speaking; CallLimits then ends the call.
             user_away_timeout=config.SESSION_INACTIVITY_SECONDS or None,
         )
+        if call_settings.speakerphone_safe():
+            logging.getLogger(__name__).info("speakerphone-safe mode on (%s): the microphone is ignored while the avatar speaks",
+                                             "phone" if call_settings.is_mobile else "all devices")
         agent = KnowledgeVoiceAgent(self.reasoning_stage, self.find_conversation(call_settings), call_settings.speak_greeting,
                                     ReplyDetailsPublisher(job_context.room), avatar_call)
         if avatar_call is not None:
@@ -180,3 +183,7 @@ class CallSettings:
         if self.voice_choice is None and config.VOICE_CHOICES:
             self.voice_choice = config.VOICE_CHOICES[0]
         self.speak_greeting = attributes.get(config.VOICE_GREETING_ATTRIBUTE, "true") == "true"
+        self.is_mobile = attributes.get(config.VOICE_DEVICE_ATTRIBUTE) == "mobile"
+
+    def speakerphone_safe(self):
+        return config.SPEAKERPHONE_SAFE_MODE == "all" or (config.SPEAKERPHONE_SAFE_MODE == "mobile" and self.is_mobile)

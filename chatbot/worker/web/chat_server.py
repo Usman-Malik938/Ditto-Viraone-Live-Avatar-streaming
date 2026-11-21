@@ -28,6 +28,7 @@ ACCESS_COOKIE_NAME = "viraone_access"
 # Pages that use the login cookie and the browser's login box; every other path is API, portrait or the widget.
 CONSOLE_PAGE_PATHS = ("/", "/index.html", "/voice", "/voice.html")
 # All the widget needs, and all its key (WIDGET_ACCESS_KEY) opens.
+MOBILE_USER_AGENT = re.compile(r"Mobi|Android|iPhone|iPad|iPod")
 WIDGET_PATHS = ("/widget", "/api/settings", "/avatar-portrait", "/api/voice-token")
 # The widget's visitor token: a random id the browser keeps (anything else falls back to the IP address).
 VISITOR_TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9-]{8,64}$")
@@ -289,6 +290,7 @@ class ChatRequestHandler(BaseHTTPRequestHandler):
             config.VOICE_SESSION_ATTRIBUTE: session_id,
             config.VOICE_GREETING_ATTRIBUTE: speak_greeting,
             config.VOICE_VOICE_ATTRIBUTE: voice_key,
+            config.VOICE_DEVICE_ATTRIBUTE: "mobile" if MOBILE_USER_AGENT.search(self.headers.get("User-Agent", "")) else "desktop",
         }
         token = self.token_issuer.issue_token(room_name, f"{config.VOICE_VISITOR_IDENTITY_PREFIX}{uuid.uuid4().hex[:8]}", attributes)
         self.send_json({"url": config.LIVEKIT_PUBLIC_URL, "token": token, "room": room_name})

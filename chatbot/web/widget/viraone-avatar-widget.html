@@ -163,6 +163,7 @@
       callLimit: "Wykorzystano limit rozmów na godzinę. Spróbuj ponownie za {minutes} min.",
       tooMany: "Za dużo prób. Spróbuj ponownie za chwilę.", remaining: "Pozostało {time}",
       timingTitle: "Czas odpowiedzi", timingEmpty: "Zadaj pytanie, a pojawi się tu pomiar.",
+      timingMicrophone: "Mikrofon: redukcja echa {echo}, redukcja szumów {noise}",
       timingCaption: "od końca Twojej wypowiedzi do odpowiedzi awatara",
       timingWait: "Wykrycie końca wypowiedzi", timingSearch: "Wyszukiwanie w bazie wiedzy",
       timingModel: "Model językowy (OpenAI)", timingVoice: "Głos (ElevenLabs)", timingFace: "Twarz awatara (Ditto)",
@@ -183,6 +184,7 @@
       callLimit: "The hourly call limit is used up. Try again in {minutes} min.",
       tooMany: "Too many attempts. Please try again in a moment.", remaining: "{time} left",
       timingTitle: "Response time", timingEmpty: "Ask a question to see the measurement here.",
+      timingMicrophone: "Microphone: echo cancellation {echo}, noise suppression {noise}",
       timingCaption: "from the end of your question to the avatar's answer",
       timingWait: "End-of-speech detection", timingSearch: "Knowledge base search",
       timingModel: "Language model (OpenAI)", timingVoice: "Voice (ElevenLabs)", timingFace: "Avatar face (Ditto)",
@@ -428,6 +430,7 @@
       // Phones play sound only after a tap: the Talk tap unlocks it; if the browser still blocks it, a button appears.
       room.startAudio().catch(function () {});
       await room.localParticipant.setMicrophoneEnabled(true, { echoCancellation: true, noiseSuppression: true, autoGainControl: true });
+      this.reportMicrophoneSettings(room);
       this.showSoundButtonIfBlocked();
       this.startCountdown();
       var self = this;
@@ -775,6 +778,37 @@
     return (this.language === "pl" ? text.replace(".", ",") : text) + " s";
   };
 
+  /* Whether the browser really applied echo cancellation and noise suppression (it may ignore the request), shown in
+     the console and in the timing panel: on a phone's built-in speaker, echo cancellation is what stops the avatar
+     from hearing its own voice. */
+  AvatarWidget.prototype.reportMicrophoneSettings = function (room) {
+    try {
+      var publication = room.localParticipant.getTrackPublication(window.LivekitClient.Track.Source.Microphone);
+      var settings = publication && publication.track && publication.track.mediaStreamTrack.getSettings();
+      if (!settings) {
+        return;
+      }
+      this.microphoneSettings = { echo: settings.echoCancellation, noise: settings.noiseSuppression };
+      console.info("ViraOne avatar microphone: echo cancellation " + settings.echoCancellation +
+                   ", noise suppression " + settings.noiseSuppression + ", auto gain " + settings.autoGainControl);
+      if (this.timingEnabled) {
+        this.renderTimings();
+      }
+    } catch (error) {
+      console.warn("ViraOne avatar: microphone settings unavailable", error);
+    }
+  };
+
+  AvatarWidget.prototype.microphoneLine = function () {
+    var settings = this.microphoneSettings;
+    if (!settings) {
+      return null;
+    }
+    var label = function (value) { return value === true ? "✓" : value === false ? "✗" : "?"; };
+    return this.timingLine("viraone-timing-caption", this.text.timingMicrophone
+      .replace("{echo}", label(settings.echo)).replace("{noise}", label(settings.noise)));
+  };
+
   AvatarWidget.prototype.renderTimings = function () {
     var panel = this.timingPanel;
     panel.textContent = "";
@@ -782,6 +816,10 @@
     title.className = "viraone-timing-title";
     title.textContent = this.text.timingTitle;
     panel.appendChild(title);
+    var microphoneLine = this.microphoneLine();
+    if (microphoneLine) {
+      panel.appendChild(microphoneLine);
+    }
     var answers = this.replyTimings;
     if (!answers.length) {
       panel.appendChild(this.timingLine("viraone-timing-caption", this.text.timingEmpty));

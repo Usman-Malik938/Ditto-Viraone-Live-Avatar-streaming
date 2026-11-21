@@ -57,11 +57,11 @@ class ListeningStage:
         from worker.stages.listening.local_live_speech_to_text import LocalLiveSpeechToText
         return LocalLiveSpeechToText(self.get_speech_recognizer(language), language.speech_recognition_language, self.recognizer_lock)
 
-    def build_turn_handling(self, language):
+    def build_turn_handling(self, language, speakerphone_safe=False):
         """When the user's turn ends and what counts as interrupting the agent. The turn detector model reads the
         transcript to judge whether the user has finished, not just whether they went quiet."""
         from livekit.plugins.turn_detector.multilingual import MultilingualModel
-        return {
+        turn_handling = {
             "turn_detection": MultilingualModel(),
             "endpointing": {
                 "min_delay": language.min_end_of_turn_delay_seconds,
@@ -76,6 +76,12 @@ class ListeningStage:
             },
             "preemptive_generation": {"enabled": config.PREEMPTIVE_GENERATION_ENABLED},
         }
+        if speakerphone_safe:
+            # The microphone's audio is dropped while the avatar speaks, so its own voice from a phone speaker can't
+            # stop it or be answered. The visitor's speech is heard again as soon as the avatar finishes.
+            turn_handling["interruption"]["enabled"] = False
+            turn_handling["interruption"]["discard_audio_if_uninterruptible"] = True
+        return turn_handling
 
     def build_speech_to_text(self):
         return NemotronSpeechToText()

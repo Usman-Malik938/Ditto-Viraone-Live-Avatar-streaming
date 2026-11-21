@@ -41,6 +41,12 @@ VOICE_GREETING_ATTRIBUTE = "speak_greeting"
 # The voice the page picked ("voice-1", ...). The page can change it during a call; the agent switches from the next
 # sentence on.
 VOICE_VOICE_ATTRIBUTE = "voice"
+# "mobile" or "desktop", from the browser's user agent when the call starts (set by the server, not the page).
+VOICE_DEVICE_ATTRIBUTE = "viraone.device"
+# Speakerphone-safe mode: while the avatar speaks, the microphone's audio is ignored, so on a phone's built-in speaker
+# the avatar can't hear its own voice and stop itself. The visitor can't interrupt by voice then (they tap the circle).
+# "off" (default), "mobile" (phones and tablets only) or "all".
+SPEAKERPHONE_SAFE_MODE = (os.getenv("SPEAKERPHONE_SAFE_MODE") or "off").strip().lower()
 # Set by the agent on itself: "on" (video coming), "unavailable" (busy or unreachable) or "off"; the page shows the
 # still portrait unless it's "on".
 AVATAR_STATE_ATTRIBUTE = "viraone.avatar"
