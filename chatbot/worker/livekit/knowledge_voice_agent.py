@@ -4,6 +4,8 @@ import time
 
 from livekit.agents import Agent, llm
 
+from worker import config
+from worker.livekit.echo_guard import ECHO_TAIL_SECONDS, EchoGuard, words_of
 from worker.livekit.reply_timeline import ReplyTimeline
 from worker.livekit.spoken_text import SpokenTextRewriter
 
@@ -27,6 +29,10 @@ class KnowledgeVoiceAgent(Agent):
         self.reply_timeline = ReplyTimeline()
         self.user_speech_ended_at = None
         self.last_reply_delivered_at = time.perf_counter()
+        self.echo_guard = EchoGuard() if config.ECHO_AWARE_INTERRUPTIONS else None
+        self.agent_stopped_speaking_at = 0.0
+        self.utterance_during_agent = False
+        self.interrupted_this_utterance = False
 
     def build_chat_context(self, history):
         chat_context = llm.ChatContext()
@@ -39,6 +45,7 @@ class KnowledgeVoiceAgent(Agent):
         self.session.on("close", self.handle_session_close)
         self.session.on("agent_false_interruption", self.log_false_interruption)
         self.session.on("agent_state_changed", self.log_interruption)
+        self.session.on("user_input_transcribed", self.handle_transcript)
         if self.speak_greeting:
             self.session.say(self.conversation_session.language.greeting)
         # While the greeting plays: open the LLM connection and warm the knowledge search for a faster first answer.
@@ -46,6 +53,8 @@ class KnowledgeVoiceAgent(Agent):
 
     def log_interruption(self, state_change):
         """An answer cut short: the agent went from speaking straight to listening because the visitor made a sound."""
+        if state_change.old_state == "speaking":
+            self.agent_stopped_speaking_at = time.monotonic()
         if state_change.old_state == "speaking" and state_change.new_state == "listening":
             speech = self.session.current_speech
             if speech is not None and speech.interrupted:
@@ -57,6 +66,34 @@ class KnowledgeVoiceAgent(Agent):
     def handle_user_state_change(self, state_change):
         if state_change.old_state == "speaking" and state_change.new_state != "speaking":
             self.user_speech_ended_at = time.perf_counter()
+        if state_change.new_state == "speaking":
+            # Speech that starts while the avatar talks (or right after) may be its own voice from the speaker.
+            self.utterance_during_agent = (self.session.agent_state == "speaking"
+                                           or time.monotonic() - self.agent_stopped_speaking_at < ECHO_TAIL_SECONDS)
+            self.interrupted_this_utterance = False
+
+    def handle_transcript(self, event):
+        """Logs every sentence heard (for diagnosis) and, with echo-aware interruptions, decides whether speech heard
+        while the avatar talks is its own voice (ignored) or the visitor (the avatar stops and listens)."""
+        if self.echo_guard is None or not self.utterance_during_agent:
+            if event.is_final:
+                logger.info("heard: %r", event.transcript)
+            return
+        echo = self.echo_guard.is_echo(event.transcript)
+        if event.is_final:
+            if echo:
+                self.echo_guard.remember_echo(event.transcript)
+                logger.info("heard during the avatar's speech, ignored as its own voice: %r", event.transcript)
+            else:
+                logger.info("heard during the avatar's speech, the visitor: %r", event.transcript)
+        if (not echo and not self.interrupted_this_utterance and self.session.agent_state == "speaking"
+                and len(words_of(event.transcript)) >= config.MIN_INTERRUPTION_WORDS):
+            self.interrupted_this_utterance = True
+            logger.info("answer stopped: the visitor spoke over the avatar: %r", event.transcript)
+            try:
+                self.session.interrupt(force=True)
+            except Exception as error:
+                logger.warning("could not stop the answer: %s", error)
 
     def handle_session_close(self, close_event):
         """The agent's own context, not the session's: only the agent's includes the typed turns it started with."""
@@ -66,12 +103,19 @@ class KnowledgeVoiceAgent(Agent):
         """User and agent messages as they were actually said; LiveKit cuts an interrupted reply to the words spoken."""
         history = []
         for message in chat_ctx.messages():
+            if message.role == "user" and self.echo_guard is not None and self.echo_guard.was_echo(message.text_content or ""):
+                continue  # the avatar's own voice heard back, not something the visitor said
             if message.role in ("user", "assistant") and message.text_content:
                 history.append({"role": message.role, "content": message.text_content})
         return history
 
     async def llm_node(self, chat_ctx, tools, model_settings):
         """chat_ctx ends with the user's new message; everything before it is what was said and heard so far."""
+        last_message = chat_ctx.messages()[-1] if chat_ctx.messages() else None
+        if (self.echo_guard is not None and last_message is not None and last_message.role == "user"
+                and self.echo_guard.was_echo(last_message.text_content or "")):
+            logger.info("not answering the avatar's own voice: %r", last_message.text_content)
+            return
         history = self.heard_history(chat_ctx)
         if not history or history[-1]["role"] != "user":
             return
@@ -94,7 +138,8 @@ class KnowledgeVoiceAgent(Agent):
         reply_timeline = self.reply_timeline
         if self.avatar_call is not None:
             self.avatar_call.report_first_face_frame_to(reply_timeline.note_face_frame)
-        text_input = TrackedTextInput(text, SpokenTextRewriter(self.conversation_session.language.code))
+        text_input = TrackedTextInput(text, SpokenTextRewriter(self.conversation_session.language.code),
+                                      self.echo_guard.note_spoken if self.echo_guard is not None else None)
         async for audio_frame in Agent.default.tts_node(self, text_input.stream(), model_settings):
             reply_timeline.note_audio(text_input.still_arriving)
             yield audio_frame
@@ -131,17 +176,24 @@ class KnowledgeVoiceAgent(Agent):
 class TrackedTextInput:
     """Passes the reply text to the TTS, rewritten for speaking, and records whether more text is still coming."""
 
-    def __init__(self, text, rewriter):
+    def __init__(self, text, rewriter, on_spoken=None):
         self.text = text
         self.rewriter = rewriter
+        self.on_spoken = on_spoken  # remembers what the avatar says, to recognise its own voice in the microphone
         self.still_arriving = True
 
     async def stream(self):
         async for chunk in self.text:
             spoken = self.rewriter.feed(chunk)
             if spoken:
+                self.note(spoken)
                 yield spoken
         remainder = self.rewriter.flush()
         if remainder:
+            self.note(remainder)
             yield remainder
         self.still_arriving = False
+
+    def note(self, spoken):
+        if self.on_spoken is not None:
+            self.on_spoken(spoken)

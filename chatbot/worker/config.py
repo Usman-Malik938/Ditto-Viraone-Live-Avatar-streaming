@@ -47,6 +47,10 @@ VOICE_DEVICE_ATTRIBUTE = "viraone.device"
 # the avatar can't hear its own voice and stop itself. The visitor can't interrupt by voice then (they tap the circle).
 # "off" (default), "mobile" (phones and tablets only) or "all".
 SPEAKERPHONE_SAFE_MODE = (os.getenv("SPEAKERPHONE_SAFE_MODE") or "off").strip().lower()
+# Echo-aware interruptions: while the avatar speaks, words the microphone hears are compared with what the avatar just
+# said (worker/livekit/echo_guard.py). Its own voice coming back through a phone speaker is ignored; different words stop
+# the avatar, so the visitor can still interrupt by voice. Every heard sentence is logged ("heard: ...") for diagnosis.
+ECHO_AWARE_INTERRUPTIONS = (os.getenv("ECHO_AWARE_INTERRUPTIONS") or "false").strip().lower() == "true"
 # Set by the agent on itself: "on" (video coming), "unavailable" (busy or unreachable) or "off"; the page shows the
 # still portrait unless it's "on".
 AVATAR_STATE_ATTRIBUTE = "viraone.avatar"

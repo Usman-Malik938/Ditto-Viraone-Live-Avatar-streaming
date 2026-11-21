@@ -76,6 +76,11 @@ class ListeningStage:
             },
             "preemptive_generation": {"enabled": config.PREEMPTIVE_GENERATION_ENABLED},
         }
+        if config.ECHO_AWARE_INTERRUPTIONS and not speakerphone_safe:
+            # LiveKit doesn't stop the avatar on sound by itself; KnowledgeVoiceAgent decides from the words heard
+            # (echo or the visitor). The audio keeps going to the recognizer so the visitor's words are still heard.
+            turn_handling["interruption"]["enabled"] = False
+            turn_handling["interruption"]["discard_audio_if_uninterruptible"] = False
         if speakerphone_safe:
             # The microphone's audio is dropped while the avatar speaks, so its own voice from a phone speaker can't
             # stop it or be answered. The visitor's speech is heard again as soon as the avatar finishes.
